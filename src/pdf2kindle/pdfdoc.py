@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import unicodedata
 from array import array
 
 import pymupdf
 
-from .model import Line, LinkRect, PageData, Span
+from .model import F_BOLD, F_ITALIC, Line, LinkRect, PageData, Span
 
 _TEXT_FLAGS = pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_MEDIABOX_CLIP
 
@@ -29,8 +30,18 @@ def _make_span(raw: dict) -> Span | None:
         return None
     text_parts: list[str] = []
     xs = array("f")
+    flags = raw["flags"]
     for ch in chars:
         c = ch["c"]
+        if "\U0001d400" <= c <= "\U0001d7ff":
+            # Mathematical Alphanumeric Symbols: e-reader fonts rarely have
+            # them. Use the plain letter and carry the style as formatting.
+            name = unicodedata.name(c, "")
+            c = unicodedata.normalize("NFKC", c)
+            if "ITALIC" in name:
+                flags |= F_ITALIC
+            if "BOLD" in name:
+                flags |= F_BOLD
         if c in _DROP:
             c = _DROP[c]
             if not c:
@@ -51,8 +62,28 @@ def _make_span(raw: dict) -> Span | None:
         baseline=raw["origin"][1],
         font=_font_name(raw["font"]),
         size=raw["size"],
-        flags=raw["flags"],
+        flags=flags,
     )
+
+
+def _respace(spans: list[Span]) -> list[Span]:
+    """Restore a word space MuPDF missed where the font changes (typically
+    between a maths glyph and the following word)."""
+    out: list[Span] = []
+    for s in spans:
+        if out:
+            prev = out[-1]
+            gap = s.x0 - prev.x1
+            if (
+                prev.font != s.font
+                and gap > 0.22 * max(prev.size, s.size)
+                and abs(prev.baseline - s.baseline) < 0.5
+                and prev.text[-1:].isalnum()
+                and s.text[:1].isalnum()
+            ):
+                out.append(_space_between(prev, s.x0))
+        out.append(s)
+    return out
 
 
 def _space_between(left: Span, x_to: float) -> Span:
@@ -202,6 +233,7 @@ def load_page(doc: pymupdf.Document, index: int) -> PageData:
             if abs(dy) > 0.05 or dx < 0.95:  # rotated or mirrored text
                 continue
             spans = [s for s in (_make_span(r) for r in ln["spans"]) if s is not None]
+            spans = _respace(spans)
             while spans and not spans[0].text.strip():
                 spans.pop(0)
             while spans and not spans[-1].text.strip():

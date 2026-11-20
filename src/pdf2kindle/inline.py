@@ -218,8 +218,8 @@ def code_lines(lines: list[Line], pitch_hint: float) -> list[list[Run]]:
     for ln in lines:
         if prev_base is not None:
             blanks = int(round((ln.baseline - prev_base) / pitch)) - 1
-            for _ in range(max(0, min(blanks, 3))):
-                out.append([])
+            if blanks > 0:
+                out.append([])  # one blank line is enough on a small screen
         prev_base = ln.baseline
         runs: list[Run] = []
         col = 0

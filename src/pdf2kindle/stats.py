@@ -191,6 +191,38 @@ def mark_furniture(pages: list[PageData]) -> int:
             marked += n
             if n == 0:
                 break
+    return marked + _mark_stray_folios(pages)
+
+
+def _mark_stray_folios(pages: list[PageData]) -> int:
+    """Page numbers that sit somewhere else on a few pages (typically at the
+    foot of chapter openers, when every other page has it in the header).
+
+    A bare number at the page edge is a folio when it follows the numbering
+    the running heads already established.
+    """
+    offsets: Counter = Counter()
+    for pg in pages:
+        for ln in pg.lines:
+            if ln.role != "furniture":
+                continue
+            text = ln.text.strip()
+            value = int(text) if text.isdigit() else _edge_number(text)
+            if value is not None:
+                offsets[value - pg.index] += 1
+    known = {off for off, n in offsets.items() if n >= 3}
+    if not known:
+        return 0
+    marked = 0
+    for pg in pages:
+        for zone in ("top", "bottom"):
+            ln = _outermost(pg, zone)
+            if ln is None:
+                continue
+            text = ln.text.strip()
+            if text.isdigit() and len(text) <= 4 and (int(text) - pg.index) in known:
+                ln.role = "furniture"
+                marked += 1
     return marked
 
 
