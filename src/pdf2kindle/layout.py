@@ -308,6 +308,8 @@ class PageFlow:
         if abs(ln.size - para[0].size) > 1.0 and not code_ish:
             return False
         em = para[0].size
+        if ln.x0 < para[0].x0 - 0.3 * em and self._starts_item(para[0]):
+            return False  # text back out at the margin does not belong to a list item
         if len(para) == 1:
             dx = ln.x0 - prev.x0
             if dx < -3.5 * em or dx > 9 * em:
