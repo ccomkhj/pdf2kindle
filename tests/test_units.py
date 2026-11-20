@@ -169,3 +169,20 @@ def test_river_columns_handle_centred_cells():
     rows = [row([("name", 100), ("country", 190), ("rating", 290)], 100), row([("Friends", 92), ("United", 180), ("States", 214), ("7.8", 297)], 114)]
     cols = _river_columns(rows, 10.0)
     assert len(cols) == 3
+
+
+def test_index_initials_do_not_end_the_index():
+    from pdf2kindle.config import Options
+    from pdf2kindle.convert import _drop_index
+    from pdf2kindle.model import Book, Heading, Paragraph
+
+    def h(title, page, level=1):
+        return Heading(page=page, level=level, runs=[Run(title)], title=title)
+
+    book = Book()
+    book.stats["pages"] = 100
+    blocks = [h("Chapter", 10), Paragraph(page=10), h("Slicing with range indexes", 40, 2), Paragraph(page=40),
+              h("Index", 90), Paragraph(page=90), h("^", 91), Paragraph(page=91), h("Colophon", 99), Paragraph(page=99)]
+    kept = _drop_index(blocks, Options(), book)
+    assert [b.title for b in kept if isinstance(b, Heading)] == ["Chapter", "Slicing with range indexes", "Colophon"]
+    assert len(kept) == 6

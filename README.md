@@ -56,10 +56,10 @@ pdf2kindle book.pdf --pages 12-340 --profile book.toml
 'GAWK: Effective AWK Programming' -> gawk.epub
   pages                599
   chapters             27
-  blocks               {'Code': 1061, 'Figure': 26, 'Heading': 467, 'ListItem': 755, 'Paragraph': 5186, 'Table': 6}
+  blocks               {'Code': 1064, 'Figure': 19, 'Heading': 467, 'ListItem': 757, 'Paragraph': 5160, 'Table': 11}
   footnotes            122
   footnotes_linked     121
-  internal_links       1920
+  internal_links       1914
   ! 1 footnote(s) had no matching marker in the text; they are listed unlinked.
 ```
 

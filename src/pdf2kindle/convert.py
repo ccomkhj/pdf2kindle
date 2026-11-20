@@ -370,7 +370,9 @@ def _drop_index(blocks: list[Block], opts: Options, book: Book) -> list[Block]:
     n_pages = book.stats.get("pages", 0)
     for b in blocks:
         if isinstance(b, Heading):
-            if dropping and b.level <= dropping:
+            # the index ends at the next real heading of its rank; its own
+            # initial-letter headings ("A", "^", "~") are part of it
+            if dropping and b.level <= dropping and sum(1 for c in b.title if c.isalnum()) >= 4:
                 dropping = 0
             # an index lives at the back of the book; a section merely named
             # "... index" in the middle does not qualify
