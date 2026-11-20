@@ -28,10 +28,11 @@ COLORS = {
 
 def inspect_pdf(path: Path) -> None:
     from .pdfdoc import load_page
-    from .stats import mark_furniture, measure
+    from .stats import mark_furniture, mark_monospace, measure
 
     doc = pymupdf.open(str(path))
     pages = [load_page(doc, i) for i in range(len(doc))]
+    inferred = mark_monospace(pages)
     furniture = mark_furniture(pages)
     st = measure(pages)
     meta = doc.metadata or {}
@@ -54,7 +55,7 @@ def inspect_pdf(path: Path) -> None:
                 mono[key] = s.mono
     print("\nfonts (characters, name, size)")
     for (font, size), n in fonts.most_common(25):
-        flag = "  mono" if mono[(font, size)] else ""
+        flag = "  mono" + (" (inferred)" if font in inferred else "") if mono[(font, size)] else ""
         print(f"  {n:>9}  {font} {size:g}{flag}")
     toc = doc.get_toc()
     print(f"\noutline   {len(toc)} entries")

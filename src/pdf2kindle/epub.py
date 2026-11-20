@@ -100,7 +100,7 @@ class Writer:
     def _runs(self, runs: list[Run], here: str, in_code: bool = False) -> str:
         out: list[str] = []
         for r in runs:
-            text = esc(r.text)
+            text = esc(r.text).replace("\u2028", "<br/>")
             if not text:
                 continue
             if r.note >= 0:

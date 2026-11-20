@@ -15,7 +15,7 @@ from .inline import SOFT, runs_text
 from .layout import Context, OutlineEntry, PageFlow, peel_footnotes, pin_outline
 from .model import Block, Book, Code, Figure, Heading, ListItem, Note, PageData, Paragraph, Run, Table
 from .pdfdoc import dest_y, load_page
-from .stats import mark_furniture, measure
+from .stats import mark_furniture, mark_monospace, measure
 from .textutil import is_page_label
 
 _INDEX_TITLE = re.compile(r"^((\w+ ){0,4}index(es)?|index(es)? of .*)$|^색인$|^찾아보기$", re.I)
@@ -29,6 +29,7 @@ _ARTIFACTS = [
     r"\(continue[sd] (on|from) (the )?(next|previous) page\)",
     r"(\(continue[sd] (on|from) (the )?(next|previous) page\)\s*){2}",
     r"this page (is )?intentionally (left )?blank\.?",
+    r"[\u2500-\u257f\u2012-\u2015_=*~\-]{8,}\ufffd?",  # a ruler typed out of dashes or box-drawing characters
 ]
 
 Progress = Callable[[str, int, int], None]
@@ -77,6 +78,9 @@ def convert(
             "they are kept as page images. Run OCR (e.g. ocrmypdf) first for reflowable text."
         )
 
+    extra_mono = mark_monospace(pages)
+    if extra_mono:
+        book.stats["mono_fonts_inferred"] = sorted(extra_mono)
     book.stats["furniture_lines"] = mark_furniture(pages)
     stats = measure(pages)
     book.stats["body_font"] = f"{stats.body_font} {stats.body_size:g}pt"
@@ -270,7 +274,10 @@ def _settle_headings(ctx: Context, blocks: list[Block], outline: list[OutlineEnt
             key=lambda sig: -float(sig.rsplit("|", 1)[1]),
         )
         # one-off display type at the very start is the title page, not a chapter
-        ranked = [sig for sig in ranked if not (counts[sig] == 1 and first_page[sig] <= 1)] or ranked[:1]
+        last_page: dict[str, int] = {}
+        for b in subheads:
+            last_page[b.anchor] = b.page
+        ranked = [sig for sig in ranked if last_page[sig] > 1] or ranked[:1]
         for rank, sig in enumerate(ranked[:4]):
             level_of[sig] = rank + 1
     first_real = min((e.page for e in outline if e.matched), default=0) if has_outline else 0
@@ -444,10 +451,14 @@ def _link_footnotes(blocks: list[Block], book: Book) -> None:
     # same page first, so a "1" on the facing page cannot steal the note
     for offsets in ((0,), (1, -1)):
         for b in blocks:
-            if not isinstance(b, (Paragraph, ListItem)):
+            if isinstance(b, (Figure, Table)):
+                holder, attr = b, "caption"
+            elif isinstance(b, (Paragraph, ListItem)):
+                holder, attr = b, "runs"
+            else:
                 continue
             new_runs: list[Run] = []
-            for r in b.runs:
+            for r in getattr(holder, attr):
                 if not r.sup or r.note >= 0:
                     new_runs.append(r)
                     continue
@@ -473,7 +484,7 @@ def _link_footnotes(blocks: list[Block], book: Book) -> None:
                 if len(parts) > 1 and all(m.note < 0 for m in made):
                     made = [r]
                 new_runs.extend(made)
-            b.runs = new_runs
+            setattr(holder, attr, new_runs)
     # notes nobody points at still belong in the book: keep them after the
     # last block of their page
     orphans = [n for n in book.notes if not n.referenced]

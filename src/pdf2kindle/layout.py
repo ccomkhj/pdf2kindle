@@ -485,7 +485,7 @@ class PageFlow:
 
         # definition list: "TERM      description that wraps
         #                            under the description"
-        if len(para) >= 2 and para[1].x0 - first.x0 > 1.5 * em:
+        if len(para) >= 2 and para[1].x0 - first.x0 > 1.5 * em and not self._starts_item(first):
             cut = _gap_split(first, para[1].x0, em)
             if cut is not None:
                 term_line, rest_line = cut

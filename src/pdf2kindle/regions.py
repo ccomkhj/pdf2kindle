@@ -13,6 +13,9 @@ from .model import Block, Figure, Line, PageData, Table
 from .stats import DocStats
 
 
+BREAK = "\u2028"  # forced line break inside a table cell
+
+
 @dataclass
 class Found:
     blocks: list[Block] = field(default_factory=list)
@@ -430,12 +433,30 @@ def _grid_rows(inside: list[Line], ys: list[float], xs: list[float], em: float, 
             if ri is None or ci is None:
                 return None
             grid[ri][ci].append(piece)
+    from .inline import first_word_width
+    from .model import Run
+
     rows = []
     for row in grid:
         out_row = []
-        for cell in row:
+        for ci, cell in enumerate(row):
             cell.sort(key=lambda p: (p.baseline, p.x0))
-            out_row.append(join_lines([line_runs(p, pg.links) for p in cell]))
+            # lines that stop short of the cell edge were broken on purpose
+            # (one item per line); keep those breaks
+            groups: list[list[Line]] = []
+            for piece in cell:
+                prev = groups[-1][-1] if groups else None
+                wrapped = prev is not None and prev.x1 + first_word_width(piece) + 0.3 * em > xs[ci + 1] - 0.5 * em
+                if wrapped:
+                    groups[-1].append(piece)
+                else:
+                    groups.append([piece])
+            runs: list = []
+            for gi, group in enumerate(groups):
+                if gi:
+                    runs.append(Run(BREAK))
+                runs.extend(join_lines([line_runs(p, pg.links) for p in group]))
+            out_row.append(runs)
         rows.append(out_row)
     return rows
 

@@ -2,11 +2,68 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 
-from .model import PageData
+from .model import F_MONO, PageData
 from .textutil import is_page_label, strip_numbers
+
+
+_MONO_NAME = re.compile(
+    r"mono(?!type)|courier|consol|menlo|monaco|inconsolata|source ?code|fira ?code|typewriter|lucida ?cons|"
+    r"letter ?gothic|andale|cmtt|cmsltt|cmitt|lmtt|txtt|pcr[a-z]{0,2}\d|nimbusmon|cascadia|pragmata|iosevka|"
+    r"terminus|anonymous|ocr-?[ab]|prestige",
+    re.I,
+)
+_NARROW = set("il.,;:'|!")
+_WIDE = set("mwMW@")
+
+
+def mark_monospace(pages: list[PageData]) -> set[str]:
+    """Flag fixed-width fonts the PDF does not declare as such.
+
+    Many producers (Word, macOS Quartz, some LaTeX setups) leave the
+    fixed-pitch bit off. A font counts as monospace when its name says so or
+    when its narrow and wide letters measurably advance by the same amount.
+    """
+    narrow: dict[str, list[float]] = {}
+    wide: dict[str, list[float]] = {}
+    declared: set[str] = set()
+    for pg in pages:
+        for ln in pg.lines:
+            for s in ln.spans:
+                if s.mono:
+                    declared.add(s.font)
+                    continue
+                if len(narrow.get(s.font, ())) > 60 and len(wide.get(s.font, ())) > 60:
+                    continue
+                for i, c in enumerate(s.text[:-1]):  # the last advance may be a clipped bbox
+                    if c in _NARROW:
+                        narrow.setdefault(s.font, []).append((s.xs[i + 1] - s.xs[i]) / s.size)
+                    elif c in _WIDE:
+                        wide.setdefault(s.font, []).append((s.xs[i + 1] - s.xs[i]) / s.size)
+    found: set[str] = set()
+    for font in set(narrow) | set(wide):
+        a, b = narrow.get(font, []), wide.get(font, [])
+        if len(a) >= 6 and len(b) >= 6:
+            ma, mb = sorted(a)[len(a) // 2], sorted(b)[len(b) // 2]
+            if mb > 0 and abs(ma - mb) / mb < 0.04:
+                found.add(font)
+        elif _MONO_NAME.search(font):
+            found.add(font)
+    found -= declared
+    if found:
+        for pg in pages:
+            for ln in pg.lines:
+                hit = False
+                for s in ln.spans:
+                    if s.font in found:
+                        s.flags |= F_MONO
+                        hit = True
+                if hit:
+                    ln.recompute()
+    return found
 
 
 @dataclass

@@ -77,6 +77,7 @@ def _print_report(report: dict) -> None:
         "words",
         "blocks",
         "body_font",
+        "mono_fonts_inferred",
         "outline_entries",
         "outline_unmatched",
         "toc_pages_dropped",
