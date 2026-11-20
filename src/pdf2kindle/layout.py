@@ -391,9 +391,12 @@ class PageFlow:
         for ln in group:
             ln.role = "heading"
         runs = join_lines([line_runs(ln, []) for ln in group])
+        whole_italic = all(r.italic or not r.text.strip() for r in runs)
         for r in runs:
             r.bold = False
             r.sup = False
+            if whole_italic:
+                r.italic = False  # the heading style itself, not emphasis
             r.text = r.text.replace(SOFT, "")
         main = max(group, key=lambda l: l.size)
         sig = (main.font, main.size)

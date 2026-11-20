@@ -18,7 +18,11 @@ from .pdfdoc import dest_y, load_page
 from .stats import mark_furniture, mark_monospace, measure
 from .textutil import is_page_label
 
-_INDEX_TITLE = re.compile(r"^((\w+ ){0,4}index(es)?|index(es)? of .*)$|^색인$|^찾아보기$", re.I)
+_INDEX_TITLE = re.compile(
+    r"^(index|indexes|indices|(subject|concept|general|function|keyword|name|author|variable|command|topic|symbol) index|"
+    r"index of [\w ]+)$|^색인$|^찾아보기$",
+    re.I,
+)
 _CONTENTS_TITLE = re.compile(r"^(table of )?contents$|^brief contents$|^short contents$|^목차$|^차례$", re.I)
 _LOOSE_CAPTION = re.compile(r"^(Figure|Fig\.|Table|Listing|그림|표)\s*\d", re.I)
 _SECTION_NUMBER = re.compile(r"^\s*((?:\d+|[A-Z])(?:\.\d+)*)\.?\s+\S")
@@ -171,18 +175,29 @@ def _find_toc_pages(pages: list[PageData]) -> set[int]:
     share: dict[int, tuple[int, int]] = {}
     for pg in pages[:limit]:
         lines = [ln for ln in pg.lines if ln.role != "furniture"]
+        # judge whole rows: the page number is often a separate, smaller piece
+        rows: list[list] = []
+        for ln in sorted(lines, key=lambda l: (l.baseline, l.x0)):
+            if rows and abs(rows[-1][-1].baseline - ln.baseline) < 1.5:
+                rows[-1].append(ln)
+            else:
+                rows.append([ln])
         hits = 0
-        for ln in lines:
-            text = ln.text.rstrip()
+        for row in rows:
+            text = " ".join(ln.text.strip() for ln in row)
             if _LEADER.search(text):
                 hits += 1
                 continue
             tokens = text.split()
-            if len(tokens) >= 2 and is_page_label(tokens[-1]):
-                last = [s for s in ln.spans if s.text.strip()]
-                if len(last) >= 2 and last[-1].x0 - last[-2].x1 > 1.5 * ln.size:
-                    hits += 1
-        share[pg.index] = (hits, len(lines))
+            if len(tokens) < 2 or not is_page_label(tokens[-1]):
+                continue
+            if len(row) >= 2:
+                hits += 1  # the number is a piece of its own
+                continue
+            last = [s for s in row[0].spans if s.text.strip()]
+            if len(last) >= 2 and last[-1].x0 - last[-2].x1 > 0.8 * row[0].size:
+                hits += 1
+        share[pg.index] = (hits, len(rows))
     titled = {
         pg.index
         for pg in pages[:limit]
@@ -336,11 +351,14 @@ def _drop_index(blocks: list[Block], opts: Options, book: Book) -> list[Block]:
         return blocks
     out: list[Block] = []
     dropping = 0
+    n_pages = book.stats.get("pages", 0)
     for b in blocks:
         if isinstance(b, Heading):
             if dropping and b.level <= dropping:
                 dropping = 0
-            if not dropping and _INDEX_TITLE.match(b.title.strip()):
+            # an index lives at the back of the book; a section merely named
+            # "... index" in the middle does not qualify
+            if not dropping and b.page >= 0.6 * n_pages and _INDEX_TITLE.match(b.title.strip()):
                 dropping = b.level
                 book.stats["index_dropped"] = b.title
         if not dropping:
