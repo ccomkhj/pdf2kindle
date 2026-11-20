@@ -11,8 +11,12 @@ from .textutil import clean_text
 # Marks a line-end hyphen whose fate (soft hyphen vs. real hyphen) is decided
 # once the whole book's vocabulary is known. Never reaches the output.
 SOFT = "\x01"
+# Marks a line break between two Hangul syllables: Korean may break a line
+# inside a word, so whether a space belongs there is decided the same way.
+KSOFT = "\x02"
 
 _CJK = re.compile(r"[぀-ヿ㐀-鿿豈-﫿＀-￯]")
+_HANGUL = re.compile(r"[\uac00-\ud7a3]")
 _WS = re.compile(r"[ \t\r\n]+")
 _PATHISH = re.compile(r"(?:\S*/\S+/|\w+://\S*/)$")
 
@@ -116,6 +120,8 @@ def join_lines(per_line: list[list[Run]]) -> list[Run]:
                 last.text = tail  # a path or URL broken after a slash
             elif tail and head and _CJK.match(tail[-1]) and _CJK.match(head[0]):
                 last.text = tail
+            elif tail and head and _HANGUL.match(tail[-1]) and _HANGUL.match(head[0]):
+                last.text = tail + KSOFT
             else:
                 last.text = tail + " "
         for r in runs:
@@ -165,7 +171,7 @@ def tidy_runs(runs: list[Run]) -> list[Run]:
 
 
 def runs_text(runs: list[Run]) -> str:
-    return "".join(r.text for r in runs).replace(SOFT, "")
+    return "".join(r.text for r in runs).replace(SOFT, "").replace(KSOFT, " ")
 
 
 def first_word_width(line: Line) -> float:

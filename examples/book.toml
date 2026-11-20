@@ -26,6 +26,7 @@ mono_fonts = []                   # e.g. ["UbuntuMono", "LetterGothic"]
 not_mono_fonts = []
 
 code_wrap = "hanging"             # "hanging": wrapped code lines are indented; "plain": one <pre> per listing
+equations = true                  # keep displayed equations as images (false: leave them as text)
 tables = "auto"                   # "auto": HTML when the grid is certain, else an image; "html"; "image"
 footnotes = true                  # turn page-bottom notes into Kindle pop-up footnotes
 

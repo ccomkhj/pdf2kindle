@@ -11,7 +11,7 @@ import pymupdf
 
 from . import regions
 from .config import Options, parse_ranges
-from .inline import SOFT, join_lines, line_runs, runs_text
+from .inline import KSOFT, SOFT, join_lines, line_runs, runs_text
 from .layout import Context, OutlineEntry, PageFlow, peel_footnotes, pin_outline
 from .model import Block, Book, Code, Figure, Heading, Line, ListItem, Note, PageData, Paragraph, Run, Table
 from .pdfdoc import dest_y, load_page
@@ -260,11 +260,12 @@ def _page_blocks(
     # outline entries nothing on the page matched: keep them as invisible anchors
     for entry in ctx.outline.get(pg.index, []):
         if not entry.matched:
-            # a bookmark often points at the end of the page before the one
-            # its heading landed on: look there before settling for an anchor
+            # a bookmark often points a little before the page its heading
+            # landed on (the end of the previous page, or a float page or
+            # two earlier): look ahead before settling for an anchor
             nxt = pg.index + 1
-            if not entry.carried and nxt in wanted_next:
-                entry.carried = True
+            if entry.carried < 3 and nxt in wanted_next:
+                entry.carried += 1
                 entry.page = nxt
                 entry.y = None
                 ctx.outline.setdefault(nxt, []).insert(0, entry)
@@ -632,6 +633,48 @@ def _resolve_hyphens(blocks: list[Block], book: Book) -> None:
         r.text = pat.sub(decide, r.text).replace(SOFT, "")
     book.stats["hyphens_joined"] = joined
     book.stats["hyphens_kept"] = kept
+    _resolve_korean_breaks(runs, book)
+
+
+def _resolve_korean_breaks(runs: list[Run], book: Book) -> None:
+    """Korean lines may break inside a word. At each Hangul-to-Hangul line
+    break, join the two pieces when the book uses the joined word elsewhere,
+    and put a space when it does not."""
+    if not any(KSOFT in r.text for r in runs):
+        return
+    word = re.compile(r"[\uac00-\ud7a3]+")
+    vocab: Counter = Counter()
+    for r in runs:
+        for chunk in r.text.split(KSOFT):
+            vocab.update(word.findall(chunk))
+    pat = re.compile(r"([\uac00-\ud7a3]+)" + KSOFT + r"([\uac00-\ud7a3]+)")
+    joined = spaced = 0
+
+    def decide(m: re.Match) -> str:
+        nonlocal joined, spaced
+        a, b = m.group(1), m.group(2)
+        whole = vocab.get(a + b, 0)
+        # joined form attested, and at least as familiar as the two halves
+        if whole and whole >= min(vocab.get(a, 0), vocab.get(b, 0)) / 4:
+            joined += 1
+            return a + b
+        spaced += 1
+        return a + " " + b
+
+    for idx, r in enumerate(runs):
+        if KSOFT not in r.text:
+            continue
+        text = pat.sub(decide, r.text)
+        if text.endswith(KSOFT) and idx + 1 < len(runs):
+            a = word.search(text[:-1][::-1])
+            b = word.match(runs[idx + 1].text)
+            left = a.group(0)[::-1] if a and text[:-1].endswith(a.group(0)[::-1]) else ""
+            right = b.group(0) if b else ""
+            keep_apart = not (left and right and vocab.get(left + right, 0))
+            text = text[:-1] + (" " if keep_apart else "")
+        r.text = text.replace(KSOFT, " ")
+    book.stats["korean_breaks_joined"] = joined
+    book.stats["korean_breaks_spaced"] = spaced
 
 
 def _resolve_links(blocks: list[Block], missing_pages: set[int], book: Book) -> None:

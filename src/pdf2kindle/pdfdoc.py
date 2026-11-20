@@ -24,6 +24,10 @@ def _font_name(name: str) -> str:
     return name
 
 
+def _hangul(c: str) -> bool:
+    return "\uac00" <= c <= "\ud7a3" or "\u3131" <= c <= "\u318e"
+
+
 def _make_span(raw: dict) -> Span | None:
     chars = raw["chars"]
     if not chars:
@@ -31,8 +35,18 @@ def _make_span(raw: dict) -> Span | None:
     text_parts: list[str] = []
     xs = array("f")
     flags = raw["flags"]
+    size = raw["size"]
+    prev_c = ""
+    prev_x1 = 0.0
     for ch in chars:
         c = ch["c"]
+        # Korean set by TeX often carries no space glyphs at all, and MuPDF
+        # does not invent them between Hangul: read word spaces off the gaps
+        if prev_c and (_hangul(c) or _hangul(prev_c)) and not c.isspace() and not prev_c.isspace():
+            if ch["bbox"][0] - prev_x1 > 0.16 * size:
+                text_parts.append(" ")
+                xs.append(prev_x1)
+        prev_c, prev_x1 = c, ch["bbox"][2]
         if "\U0001d400" <= c <= "\U0001d7ff":
             # Mathematical Alphanumeric Symbols: e-reader fonts rarely have
             # them. Use the plain letter and carry the style as formatting.
@@ -74,13 +88,17 @@ def _respace(spans: list[Span]) -> list[Span]:
         if out:
             prev = out[-1]
             gap = s.x0 - prev.x1
+            a, b = prev.text[-1:], s.text[:1]
+            level = abs(prev.baseline - s.baseline) < 0.5
             if (
                 prev.font != s.font
                 and gap > 0.22 * max(prev.size, s.size)
-                and abs(prev.baseline - s.baseline) < 0.5
-                and prev.text[-1:].isalnum()
-                and s.text[:1].isalnum()
+                and level
+                and a.isalnum()
+                and b.isalnum()
             ):
+                out.append(_space_between(prev, s.x0))
+            elif level and gap > 0.16 * max(prev.size, s.size) and (_hangul(a) or _hangul(b)) and not a.isspace() and not b.isspace():
                 out.append(_space_between(prev, s.x0))
         out.append(s)
     return out

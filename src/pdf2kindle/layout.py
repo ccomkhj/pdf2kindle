@@ -29,7 +29,7 @@ class OutlineEntry:
     page: int
     y: float | None = None
     matched: bool = False
-    carried: bool = False  # already retried on the following page
+    carried: int = 0  # how many following pages it has been retried on
 
 
 @dataclass

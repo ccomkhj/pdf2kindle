@@ -30,12 +30,14 @@ def mark_monospace(pages: list[PageData]) -> set[str]:
     narrow: dict[str, list[float]] = {}
     wide: dict[str, list[float]] = {}
     declared: set[str] = set()
+    seen: set[str] = set()
     for pg in pages:
         for ln in pg.lines:
             for s in ln.spans:
                 if s.mono:
                     declared.add(s.font)
                     continue
+                seen.add(s.font)
                 if len(narrow.get(s.font, ())) > 60 and len(wide.get(s.font, ())) > 60:
                     continue
                 for i, c in enumerate(s.text[:-1]):  # the last advance may be a clipped bbox
@@ -44,7 +46,7 @@ def mark_monospace(pages: list[PageData]) -> set[str]:
                     elif c in _WIDE:
                         wide.setdefault(s.font, []).append((s.xs[i + 1] - s.xs[i]) / s.size)
     found: set[str] = set()
-    for font in set(narrow) | set(wide):
+    for font in seen:
         a, b = narrow.get(font, []), wide.get(font, [])
         if len(a) >= 6 and len(b) >= 6:
             ma, mb = sorted(a)[len(a) // 2], sorted(b)[len(b) // 2]

@@ -77,3 +77,95 @@ def test_merge_rects_keeps_and_joins():
     a, b, c = pymupdf.Rect(0, 0, 10, 10), pymupdf.Rect(12, 0, 20, 10), pymupdf.Rect(100, 100, 110, 110)
     merged = _merge_rects([a, b, c], 3.0)
     assert [tuple(r) for r in merged] == [(0, 0, 20, 10), (100, 100, 110, 110)]
+
+
+def _mono_page(font: str, flags: int = 0) -> PageData:
+    """One line of text in ``font`` where every glyph advances by 6pt."""
+    text = "will it mill, William? I'm ill. Mmm, www: warm womb."
+    xs = array("f", [72 + i * 6.0 for i in range(len(text) + 1)])
+    return PageData(index=0, width=612, height=792, lines=[Line(spans=[Span(text, xs, 90, 102, 100, font, 10.0, flags)], page=0)])
+
+
+def test_monospace_is_inferred_from_glyph_advances():
+    from pdf2kindle.stats import mark_monospace
+
+    page = _mono_page("SomeUnflaggedFont")
+    assert mark_monospace([page]) == {"SomeUnflaggedFont"}
+    assert page.lines[0].mono_ratio == 1.0
+
+
+def test_proportional_font_is_left_alone():
+    from pdf2kindle.stats import mark_monospace
+
+    text = "will it mill, William? I'm ill. Mmm, www: warm womb."
+    widths = {"i": 2.8, "l": 2.8, ",": 2.5, ".": 2.5, "'": 2.0, "m": 8.3, "w": 7.2, "W": 9.4}
+    xs = array("f", [72.0])
+    for c in text:
+        xs.append(xs[-1] + widths.get(c, 5.0))
+    page = PageData(index=0, width=612, height=792, lines=[Line(spans=[Span(text, xs, 90, 102, 100, "Serif", 10.0, 0)], page=0)])
+    assert mark_monospace([page]) == set()
+
+
+def test_monospace_by_name_when_too_little_text_to_measure():
+    from pdf2kindle.stats import mark_monospace
+
+    xs = array("f", [72 + i * 6.0 for i in range(4)])
+    page = PageData(index=0, width=612, height=792, lines=[Line(spans=[Span("x=1", xs, 90, 102, 100, "Consolas", 10.0, 0)], page=0)])
+    assert mark_monospace([page]) == {"Consolas"}
+
+
+def _raw_span(text: str, x: float, widths: list[float], gaps: list[float], font: str = "F", size: float = 10.0) -> dict:
+    chars = []
+    for c, w, g in zip(text, widths, gaps):
+        x += g
+        chars.append({"c": c, "bbox": (x, 90.0, x + w, 102.0), "origin": (x, 100.0)})
+        x += w
+    return {"chars": chars, "bbox": (chars[0]["bbox"][0], 90.0, x, 102.0), "origin": (chars[0]["bbox"][0], 100.0), "font": font, "size": size, "flags": 0}
+
+
+def test_korean_word_spaces_come_from_glyph_gaps():
+    from pdf2kindle.pdfdoc import _make_span
+
+    # "새프로젝트를만드는" printed as three words with no space glyphs
+    text = "새프로젝트를만드는"
+    gaps = [0, 3.0, 0, 0, 0, 0, 3.0, 0, 0]
+    span = _make_span(_raw_span(text, 72.0, [10.0] * len(text), gaps))
+    assert span.text == "새 프로젝트를 만드는"
+    assert len(span.xs) == len(span.text) + 1
+
+
+def test_maths_alphanumerics_become_styled_letters():
+    from pdf2kindle.pdfdoc import _make_span
+
+    span = _make_span(_raw_span("\U0001d44b", 72.0, [7.0], [0]))  # MATHEMATICAL ITALIC CAPITAL X
+    assert span.text == "X" and span.italic
+
+
+def test_korean_line_breaks_use_the_books_vocabulary():
+    from pdf2kindle.convert import _resolve_korean_breaks
+    from pdf2kindle.inline import KSOFT
+    from pdf2kindle.model import Book
+
+    runs = [
+        Run("프로젝트를 만들고 프로젝트를 저장합니다."),
+        Run(f"새 프로{KSOFT}젝트를 만들어{KSOFT}봅시다 그리고 봅시다"),
+    ]
+    book = Book()
+    _resolve_korean_breaks(runs, book)
+    assert runs[1].text == "새 프로젝트를 만들어 봅시다 그리고 봅시다"
+    assert book.stats["korean_breaks_joined"] == 1 and book.stats["korean_breaks_spaced"] == 1
+
+
+def test_river_columns_handle_centred_cells():
+    from pdf2kindle.regions import _river_columns
+
+    def row(cells, y):
+        spans = []
+        for text, x in cells:
+            xs = array("f", [x + i * 5 for i in range(len(text) + 1)])
+            spans.append(Span(text, xs, y - 8, y + 2, y, "Body", 10.0, 0))
+        return Line(spans=spans, page=0)
+
+    rows = [row([("name", 100), ("country", 190), ("rating", 290)], 100), row([("Friends", 92), ("United", 180), ("States", 214), ("7.8", 297)], 114)]
+    cols = _river_columns(rows, 10.0)
+    assert len(cols) == 3
