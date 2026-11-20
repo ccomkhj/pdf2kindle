@@ -29,6 +29,7 @@ class OutlineEntry:
     page: int
     y: float | None = None
     matched: bool = False
+    carried: bool = False  # already retried on the following page
 
 
 @dataclass

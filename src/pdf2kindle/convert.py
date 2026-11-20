@@ -105,7 +105,7 @@ def convert(
         say("layout", pg.index + 1, n)
         if pg.index not in wanted or pg.index in toc_pages:
             continue
-        blocks.extend(_page_blocks(ctx, doc, pg, opts, book, trace))
+        blocks.extend(_page_blocks(ctx, doc, pg, opts, book, trace, wanted - toc_pages))
     book.notes = ctx.notes
 
     _settle_headings(ctx, blocks, outline, book)
@@ -225,7 +225,13 @@ def _find_toc_pages(pages: list[PageData]) -> set[int]:
 
 
 def _page_blocks(
-    ctx: Context, doc: pymupdf.Document, pg: PageData, opts: Options, book: Book, trace: list | None = None
+    ctx: Context,
+    doc: pymupdf.Document,
+    pg: PageData,
+    opts: Options,
+    book: Book,
+    trace: list | None = None,
+    wanted_next: set[int] | frozenset = frozenset(),
 ) -> list[Block]:
     lines = [ln for ln in pg.lines if ln.role != "furniture"]
     if pg.scanned:
@@ -254,6 +260,15 @@ def _page_blocks(
     # outline entries nothing on the page matched: keep them as invisible anchors
     for entry in ctx.outline.get(pg.index, []):
         if not entry.matched:
+            # a bookmark often points at the end of the page before the one
+            # its heading landed on: look there before settling for an anchor
+            nxt = pg.index + 1
+            if not entry.carried and nxt in wanted_next:
+                entry.carried = True
+                entry.page = nxt
+                entry.y = None
+                ctx.outline.setdefault(nxt, []).insert(0, entry)
+                continue
             y = entry.y if entry.y is not None else 0.0
             blocks.append(Heading(page=pg.index, y=y - 0.5, y_end=y, level=entry.level, runs=[], title=entry.title))
             book.stats["outline_unmatched"] = book.stats.get("outline_unmatched", 0) + 1
