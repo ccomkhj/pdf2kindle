@@ -288,7 +288,7 @@ def _settle_headings(ctx: Context, blocks: list[Block], outline: list[OutlineEnt
     # "CHAPTER / ONE" lines printed above a chapter title are a label for it
     labels: set[int] = set()
     for i, b in enumerate(blocks):
-        if isinstance(b, Heading) and b.level == 1 and b.runs:
+        if isinstance(b, Heading) and b.level <= 2 and b.runs:
             j = i - 1
             while j >= 0 and isinstance(blocks[j], Paragraph) and blocks[j].kind == "subhead" and blocks[j].page == b.page:
                 if len(runs_text(blocks[j].runs)) > 40:
@@ -648,6 +648,8 @@ def _metadata(doc: pymupdf.Document, book: Book, opts: Options, pages: list[Page
             for ln in pg.lines:
                 if len(ln.text.strip()) >= 3 and (best is None or ln.size > best.size):
                     best = ln
+            if best is not None:
+                break  # the first page that has any text is the title page
         title = best.text.strip() if best else Path(doc.name).stem
     book.title = " ".join(title.split())
     book.author = opts.author or (meta.get("author") or "").strip()

@@ -112,14 +112,68 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
         except Exception:
             clusters = []
 
-    # ---- tables --------------------------------------------------------------
-    table_rects: list[pymupdf.Rect] = []
+    # ---- figures located by their caption ------------------------------------
+    # Whatever sits between a "Figure N:" caption and the running text above
+    # it is the figure, however many loose strokes and labels it is made of.
+    captioned: list[pymupdf.Rect] = []
+    em = st.body_size
+    content_top = min((ln.y0 for ln in lines), default=0.0)
+
+    def anchored(ln: Line) -> bool:
+        """A line of running text: body size, starting at the text margin."""
+        if abs(ln.size - st.body_size) > 0.8 or ln.mono_ratio > 0.5:
+            return False
+        at_margin = abs(ln.x0 - left) <= 2 or (st.parindent and abs(ln.x0 - left - st.parindent) <= 2)
+        return bool(at_margin) and sum(1 for c in ln.text if c.isalpha()) >= 3
+
     try:
         tables = page.find_tables().tables if lines else []
     except Exception:
         tables = []
+    # a table drawn as a full grid is certainly a table, never part of a figure
+    grids = []
+    for t in tables:
+        ys, xs = _grid_lines(pymupdf.Rect(t.bbox), drawings)
+        if len(ys) >= 3 and len(xs) >= 3:
+            grids.append(pymupdf.Rect(t.bbox))
+
+    def stops(ln: Line) -> bool:
+        """Lines a figure cannot extend above: text, code, headings, captions."""
+        if anchored(ln) or ln.mono_ratio >= 0.8 or _ANY_CAPTION.match(ln.text):
+            return True
+        return ln.size >= st.body_size + 1.2 and ln.bold_ratio > 0.5
+
+    for cap in lines:
+        if cap.role or not _FIG_CAPTION.match(cap.text):
+            continue
+        above = [ln for ln in lines if not ln.role and ln.y1 <= cap.y0 + 1 and ln is not cap]
+        floor = max((ln.y1 for ln in above if stops(ln)), default=content_top - 1)
+        floor = max([floor] + [g.y1 for g in grids if g.y1 <= cap.y0 + 1])
+        if cap.y0 - floor > 0.75 * prect.height or cap.y0 - floor < 1.5 * em:
+            continue
+        zone = pymupdf.Rect(prect.x0, floor + 0.5, prect.x1, cap.y0 - 0.5)
+        rect = pymupdf.Rect()
+        for ln in above:
+            if ln.y0 >= floor - 0.5:
+                rect |= pymupdf.Rect(ln.x0, ln.y0, ln.x1, ln.y1)
+        for c in clusters + pictures:
+            cc = c & zone
+            if not cc.is_empty and cc.get_area() > 0.6 * c.get_area() and c.height > 1.5:
+                rect |= c
+        if rect.is_empty or rect.height < 1.2 * em:
+            continue
+        rect &= zone
+        captioned.append(rect)
+        for ln in above:
+            if ln.y0 >= floor - 0.5:
+                ln.role = "figure"
+
+    # ---- tables --------------------------------------------------------------
+    table_rects: list[pymupdf.Rect] = []
     for t in tables:
         r = pymupdf.Rect(t.bbox)
+        if any((r & f).get_area() > 0.5 * r.get_area() for f in captioned):
+            continue  # part of a figure
         inside = [ln for ln in lines if not ln.role and _center_in(ln, r)]
         block = _table(doc, pg, r, inside, drawings, st, opts, text_width) if t.col_count >= 2 and t.row_count >= 2 else None
         if block is None:
@@ -131,9 +185,11 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
         found.rects.append(("table", r))
 
     # ---- figures and boxes ---------------------------------------------------
-    figure_rects: list[pymupdf.Rect] = list(pictures)
+    figure_rects: list[pymupdf.Rect] = list(pictures) + captioned
     for c in clusters:
         c = c & prect
+        if any((c & f).get_area() > 0.6 * c.get_area() for f in captioned):
+            continue
         if c.is_empty or (c.width < 3 or c.height < 3):
             continue  # rules, underlines
         if c.width < 14 and c.height < 14:
@@ -161,7 +217,6 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
         figure_rects.append(c)
 
     # list bullets that the producer drew as little shapes instead of glyphs
-    em = st.body_size
     for d in drawings:
         r = d["rect"]
         if 1.2 <= r.width <= 0.9 * em and 1.2 <= r.height <= 0.9 * em and 0.6 <= r.width / r.height <= 1.7:
@@ -205,8 +260,10 @@ _MATH_FONT = re.compile(
     r"|math|symbol|mt ?extra|euclid",
     re.I,
 )
+_FIG_CAPTION = re.compile(r"^\s*(Figure|Fig\.)\s*[\dA-Z][\d.\-]*\s*[:.\u2013\u2014|-]\s", re.I)
+_ANY_CAPTION = re.compile(r"^\s*(Figure|Fig\.|Table|Listing|Algorithm|Example)\s*[\dA-Z][\d.\-]*\s*[:.\u2013\u2014|-]", re.I)
 _OPERATORS = set("=+\u2212\u00d7\u00b7\u2264\u2265\u2248\u2260\u2211\u220f\u222b\u221a\u221e\u2208\u2202\u2207\u2192\u2190\u21d2\u2261\u221d\u00b1<>|^")
-_EQ_NUMBER = re.compile(r"\(\s*[A-Z]?\d+(\.\d+)*[a-z]?\s*\)\s*$")
+_EQ_NUMBER = re.compile(r"[(\[]\s*[A-Z]?\d+(\.\d+)*[a-z]?\s*[)\]]\s*$")
 
 
 def _math_weight(ln: Line) -> tuple[int, int, int]:
@@ -217,17 +274,23 @@ def _math_weight(ln: Line) -> tuple[int, int, int]:
         total += n
         if _MATH_FONT.search(s.font):
             math += n
+        elif s.italic and n <= 2 and s.text.strip().isalpha():
+            math += n  # a variable set in the text italic (books without a maths font)
+            ops += 0
         else:
             ops += sum(1 for c in s.text if c in _OPERATORS)
     return math, ops, total
 
 
-def _core_extent(ln: Line, em: float) -> tuple[float, float]:
-    """x extent of a line without a trailing equation number at the margin."""
+def _core_extent(ln: Line, em: float) -> tuple[float, float, bool]:
+    """x extent of a line without a trailing equation number at the margin,
+    and whether it carried one."""
     pieces = _pieces(ln, em)
-    if len(pieces) >= 2 and _EQ_NUMBER.search("(" + pieces[-1].text.strip().strip("()") + ")") and len(pieces[-1].text.strip()) <= 10:
+    numbered = False
+    if len(pieces) >= 2 and len(pieces[-1].text.strip()) <= 10 and _EQ_NUMBER.fullmatch(pieces[-1].text.strip()):
         pieces = pieces[:-1]
-    return pieces[0].x0, pieces[-1].x1
+        numbered = True
+    return pieces[0].x0, pieces[-1].x1, numbered
 
 
 def _equations(lines: list[Line], st: DocStats, left: float, right: float, taken: list, drawings: list[dict]) -> list:
@@ -240,11 +303,14 @@ def _equations(lines: list[Line], st: DocStats, left: float, right: float, taken
     seeds: list[pymupdf.Rect] = []
     for ln in free:
         math, ops, total = _math_weight(ln)
-        if math < 2 or total == 0 or (math + ops) / total < 0.25 or ln.mono_ratio > 0.3:
+        if total == 0 or ln.mono_ratio > 0.3:
             continue
-        x0, x1 = _core_extent(ln, em)
+        x0, x1, numbered = _core_extent(ln, em)
         if x0 < left + 1.5 * em or x1 > right - 1.0 * em:
             continue  # starts at the margin or runs to it: running text with inline maths
+        mathy = math >= 2 and (math + ops) / total >= 0.25
+        if not mathy and not (numbered and (math or ops)):
+            continue
         seeds.append(pymupdf.Rect(ln.x0, ln.y0, ln.x1, ln.y1))
     if not seeds:
         return []
