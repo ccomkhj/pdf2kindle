@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pdf2kindle"
+version = "0.1.0"
+description = "Convert born-digital technical-book PDFs into clean, reflowable EPUBs tuned for Kindle."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pymupdf>=1.25",
+    "pillow>=10",
+    "tomli>=2; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+preview = ["playwright>=1.40"]
+
+[project.scripts]
+pdf2kindle = "pdf2kindle.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pdf2kindle"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

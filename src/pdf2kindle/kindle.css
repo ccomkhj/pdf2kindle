@@ -1,0 +1,81 @@
+/* Tuned for Kindle (Send to Kindle / Enhanced Typesetting).
+   Deliberately sets no body font, size, colour or justification: those stay
+   under the reader's control on the device, and dark mode keeps working. */
+
+body { margin: 0; padding: 0; }
+
+p { margin: 0 0 0.65em 0; text-indent: 0; }
+
+h1, h2, h3, h4, h5, h6 {
+  text-align: left;
+  line-height: 1.25;
+  page-break-after: avoid;
+  break-after: avoid;
+  -webkit-hyphens: none;
+  hyphens: none;
+}
+h1 { font-size: 1.6em; margin: 1.2em 0 0.8em 0; }
+h2 { font-size: 1.3em; margin: 1.4em 0 0.6em 0; }
+h3 { font-size: 1.12em; margin: 1.2em 0 0.5em 0; }
+h4, h5, h6 { font-size: 1em; margin: 1.1em 0 0.4em 0; }
+
+p.subhead { font-weight: bold; margin-top: 1em; page-break-after: avoid; break-after: avoid; }
+p.term { margin: 0.7em 0 0.15em 0; font-weight: bold; page-break-after: avoid; break-after: avoid; }
+p.center { text-align: center; }
+p.caption { font-size: 0.88em; font-style: italic; text-align: center; margin: 0.3em 0 1em 0; }
+p.note { font-size: 0.88em; }
+
+.in1 { margin-left: 1.2em; }
+.in2 { margin-left: 2.4em; }
+.in3 { margin-left: 3.6em; }
+.in4 { margin-left: 4.8em; }
+
+/* Code: the one place a font is forced. Long lines wrap instead of being cut
+   off, because an e-ink screen cannot scroll sideways. */
+code, pre, kbd, samp, tt {
+  font-family: monospace;
+  -webkit-hyphens: none;
+  hyphens: none;
+}
+code { font-size: 0.92em; }
+pre {
+  font-size: 0.74em;
+  line-height: 1.35;
+  text-align: left;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  margin: 0.7em 0 0.9em 0;
+  padding: 0.3em 0 0.3em 0.7em;
+  border-left: 0.2em solid #999999;
+}
+pre code { font-size: 1em; }
+pre.wide { font-size: 0.64em; }
+
+ul, ol { margin: 0.3em 0 0.7em 0; padding-left: 1.3em; }
+li { margin: 0 0 0.3em 0; }
+ol.explicit { list-style-type: none; padding-left: 0.4em; }
+span.marker { font-weight: bold; }
+
+figure, div.figure { margin: 1em 0; padding: 0; text-align: center; page-break-inside: avoid; break-inside: avoid; }
+img { max-width: 100%; height: auto; }
+figcaption { font-size: 0.88em; font-style: italic; text-align: center; margin-top: 0.4em; }
+
+table { border-collapse: collapse; margin: 0.8em auto; font-size: 0.85em; }
+th, td { border: 1px solid #888888; padding: 0.25em 0.45em; text-align: left; vertical-align: top; }
+th { font-weight: bold; }
+
+div.box { margin: 0.9em 0; padding: 0.5em 0.7em; border: 1px solid #888888; }
+hr { border: 0; border-top: 1px solid #888888; margin: 1.2em 20%; }
+
+sup { font-size: 0.7em; line-height: 0; vertical-align: super; }
+a { text-decoration: none; }
+a.noteref { padding: 0 0.15em; }
+
+section.notes { margin-top: 2em; border-top: 1px solid #888888; padding-top: 0.6em; }
+aside.footnote { font-size: 0.88em; margin: 0 0 0.5em 0; }
+aside.footnote p { margin: 0; }
+
+nav ol { list-style-type: none; padding-left: 1.1em; margin: 0.2em 0; }
+nav > ol { padding-left: 0; }
+nav li { margin: 0.25em 0; }

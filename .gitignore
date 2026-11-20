@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+# converted books and working files stay out of git
+/books/
+/out/
+*.epub
+*.debug.pdf
