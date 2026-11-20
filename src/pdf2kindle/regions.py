@@ -138,7 +138,7 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
             continue  # rules, underlines
         if c.width < 14 and c.height < 14:
             continue  # bullets, check marks
-        if c.x1 < left - 2 or c.x0 > right + 2:
+        if (c.x1 < left - 2 or c.x0 > right + 2) and c.width < 36 and c.height < 36:
             continue  # ornaments out in the margin
         if any((c & t).get_area() > 0.5 * min(c.get_area(), t.get_area()) for t in table_rects):
             continue
@@ -255,27 +255,50 @@ def _equations(lines: list[Line], st: DocStats, left: float, right: float, taken
             regions[-1] |= r
         else:
             regions.append(pymupdf.Rect(r))
-    # pull in satellites: limits under a sum, numerators, stacked conditions
-    for _ in range(3):
+    def prose(ln: Line) -> bool:
+        """Running text: starts at the margin, or carries real words."""
+        math, ops, total = _math_weight(ln)
+        words = sum(1 for sp in ln.spans if not _MATH_FONT.search(sp.font) for c in sp.text if c.isalpha())
+        if total and (math + ops) / total >= 0.5:
+            return False
+        return words >= 12 or (ln.x0 < left + 0.5 * em and words >= 4)
+
+    # an inline expression too tall for its line (a small matrix, a stacked
+    # fraction) leaves fragments above and below it; keep that line whole
+    for frag in free:
+        if prose(frag) or (frag.x1 - frag.x0) > 8 * em:
+            continue
+        box = pymupdf.Rect(frag.x0, frag.y0, frag.x1, frag.y1)
+        if any(reg.intersects(box) for reg in regions):
+            continue
+        for host in free:
+            if host is frag or not prose(host):
+                continue
+            if abs(host.baseline - frag.baseline) < 0.8 * st.pitch and host.x0 - 1 <= frag.x0 and frag.x1 <= host.x1 + 1:
+                math, _ops, _total = _math_weight(host)
+                if math >= 2:
+                    regions.append(pymupdf.Rect(host.x0, host.y0, host.x1, host.y1) | box)
+                break
+
+    # grow each region over everything that is not prose: the rows of a
+    # matrix, the lines of an aligned system, limits under a sum
+    for _ in range(8):
         changed = False
         for reg in regions:
             for ln in free:
                 box = pymupdf.Rect(ln.x0, ln.y0, ln.x1, ln.y1)
                 if reg.contains(box):
                     continue
-                cy = (ln.y0 + ln.y1) / 2
-                # limits of a sum or integral sit well clear of the main line
-                reach = 1.9 * em if (ln.x1 - ln.x0) < 3 * em and ln.size < st.body_size - 0.5 else 0.9 * em
-                if not (reg.y0 - reach <= cy <= reg.y1 + reach):
+                if box.y0 - reg.y1 > 0.8 * st.pitch or reg.y0 - box.y1 > 0.8 * st.pitch:
                     continue
-                if ln.x1 < reg.x0 - 2 * em or ln.x0 > reg.x1 + 2 * em:
+                if ln.x1 < reg.x0 - 3 * em or ln.x0 > reg.x1 + 3 * em:
+                    cy = (ln.y0 + ln.y1) / 2
+                    if not (reg.y0 <= cy <= reg.y1):
+                        continue
+                if prose(ln) and not reg.contains(pymupdf.Point((ln.x0 + ln.x1) / 2, (ln.y0 + ln.y1) / 2)):
                     continue
-                at_margin = ln.x0 < left + 0.5 * em
-                small = ln.size < st.body_size - 0.5 or (ln.x1 - ln.x0) < 6 * em
-                inside_band = reg.y0 - 1 <= cy <= reg.y1 + 1
-                if inside_band or (small and not at_margin):
-                    reg.include_rect(box)
-                    changed = True
+                reg.include_rect(box)
+                changed = True
         if not changed:
             break
     regions = _merge_rects(regions, 1.0)

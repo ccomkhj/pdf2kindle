@@ -11,9 +11,9 @@ import pymupdf
 
 from . import regions
 from .config import Options, parse_ranges
-from .inline import SOFT, runs_text
+from .inline import SOFT, join_lines, line_runs, runs_text
 from .layout import Context, OutlineEntry, PageFlow, peel_footnotes, pin_outline
-from .model import Block, Book, Code, Figure, Heading, ListItem, Note, PageData, Paragraph, Run, Table
+from .model import Block, Book, Code, Figure, Heading, Line, ListItem, Note, PageData, Paragraph, Run, Table
 from .pdfdoc import dest_y, load_page
 from .stats import mark_furniture, mark_monospace, measure
 from .textutil import is_page_label
@@ -21,6 +21,7 @@ from .textutil import is_page_label
 _INDEX_TITLE = re.compile(r"^((\w+ ){0,4}index(es)?|index(es)? of .*)$|^색인$|^찾아보기$", re.I)
 _CONTENTS_TITLE = re.compile(r"^(table of )?contents$|^brief contents$|^short contents$|^목차$|^차례$", re.I)
 _LOOSE_CAPTION = re.compile(r"^(Figure|Fig\.|Table|Listing|그림|표)\s*\d", re.I)
+_SECTION_NUMBER = re.compile(r"^\s*((?:\d+|[A-Z])(?:\.\d+)*)\.?\s+\S")
 _LEADER = re.compile(r"(\.\s*){4,}\s*\S{1,6}\s*$")
 _WORD = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)*", re.UNICODE)
 
@@ -214,6 +215,8 @@ def _page_blocks(
     lines = [ln for ln in pg.lines if ln.role != "furniture"]
     if pg.scanned:
         return [regions.page_image(doc, pg, opts)]
+    margin_blocks = _margin_notes(ctx, pg, lines)
+    lines = [ln for ln in lines if not ln.role]
     found = regions.find_regions(doc, pg, lines, ctx.stats, opts)
     if trace is not None:
         trace.append((pg, found.rects))
@@ -224,8 +227,9 @@ def _page_blocks(
     pinned = pin_outline(ctx, pg, lines)
     blocks = PageFlow(ctx, pg, lines, bullets=found.bullets).run(pinned)
     blocks.extend(found.blocks)
+    blocks.extend(margin_blocks)
     for box in found.boxes:
-        held = [b for b in blocks if b.y >= box.y0 - 2 and b.y_end <= box.y1 + 2]
+        held = [b for b in blocks if b.y >= box.y0 - 2 and b.y_end <= box.y1 + 2 and not _is_aside(b)]
         if any(not isinstance(b, Code) for b in held):  # a frame around a listing adds nothing
             inset = min((b.indent for b in held if isinstance(b, Paragraph)), default=0)
             for b in held:
@@ -291,19 +295,36 @@ def _settle_headings(ctx: Context, blocks: list[Block], outline: list[OutlineEnt
                     break
                 labels.add(j)
                 j -= 1
+    numbered: tuple[tuple[str, ...], int] | None = None  # last numbered heading: (number, level)
     for i, b in enumerate(blocks):
+        if isinstance(b, Heading) and b.runs:
+            m = _SECTION_NUMBER.match(runs_text(b.runs))
+            if m:
+                numbered = (tuple(m.group(1).split(".")), b.level)
         if not (isinstance(b, Paragraph) and b.kind == "subhead"):
             continue
         sig, b.anchor = b.anchor, ""
         level = level_of.get(sig)
+        if not level and numbered and has_outline:
+            # "2.2.1 Title" below outline entry "2.2 ..." is a real heading
+            # one level down, even though the outline stops above it
+            m = _SECTION_NUMBER.match(runs_text(b.runs))
+            if m:
+                number = tuple(m.group(1).split("."))
+                base, base_level = numbered
+                if len(number) > len(base) and number[: len(base)] == base:
+                    level = min(6, base_level + len(number) - len(base))
         if i in labels:
             b.kind = "label"
             for r in b.runs:
                 r.bold = False
             continue
         if level and b.page >= first_real:  # display type before the first chapter is the title page
+            whole_italic = all(r.italic or not r.text.strip() for r in b.runs)
             for r in b.runs:
                 r.bold = False
+                if whole_italic:
+                    r.italic = False
             blocks[i] = Heading(
                 page=b.page, y=b.y, y_end=b.y_end, level=level, runs=b.runs, title=runs_text(b.runs), boxed=b.boxed
             )
@@ -324,6 +345,42 @@ def _drop_index(blocks: list[Block], opts: Options, book: Book) -> list[Block]:
                 book.stats["index_dropped"] = b.title
         if not dropping:
             out.append(b)
+    return out
+
+
+def _is_aside(b: Block) -> bool:
+    return isinstance(b, Paragraph) and b.kind == "aside"
+
+
+def _margin_notes(ctx: Context, pg: PageData, lines: list[Line]) -> list[Block]:
+    """Notes set in the outer margin beside the text block.
+
+    They are lifted out of the flow (their lines would otherwise interleave
+    with the body) and returned as small asides that follow the paragraph
+    they stood next to.
+    """
+    st = ctx.stats
+    left, right = st.left[pg.index], st.right[pg.index]
+    em = st.body_size
+    side = [ln for ln in lines if not ln.role and (ln.x0 > right + 0.4 * em or ln.x1 < left - 0.4 * em) and ln.size < st.body_size - 0.4]
+    if not side:
+        return []
+    side.sort(key=lambda ln: (ln.baseline, ln.x0))
+    groups: list[list[Line]] = []
+    for ln in side:
+        if groups and 0 < ln.baseline - groups[-1][-1].baseline < 1.6 * st.pitch_for(ln.size):
+            groups[-1].append(ln)
+        else:
+            groups.append([ln])
+    out: list[Block] = []
+    for group in groups:
+        for ln in group:
+            ln.role = "margin"
+        runs = join_lines([line_runs(ln, pg.links) for ln in group])
+        text = runs_text(runs)
+        if not text.strip() or is_page_label(text):
+            continue
+        out.append(Paragraph(page=pg.index, y=group[0].y0, y_end=group[-1].y1, runs=runs, kind="aside"))
     return out
 
 
@@ -365,12 +422,12 @@ def _merge_across_pages(blocks: list[Block], stats) -> list[Block]:
         if out and b.page != out[-1].page:
             # floats (figures, tables) at the page top may sit between the halves
             j = i
-            while j < n and isinstance(blocks[j], (Figure, Table)) and blocks[j].page == b.page:
+            while j < n and (isinstance(blocks[j], (Figure, Table)) or _is_aside(blocks[j])) and blocks[j].page == b.page:
                 j += 1
             head = blocks[j] if j < n and blocks[j].page == b.page else None
             # ... and floats may also trail the first half at the page bottom
             k = len(out) - 1
-            while k >= 0 and isinstance(out[k], (Figure, Table)) and out[k].page == out[-1].page:
+            while k >= 0 and (isinstance(out[k], (Figure, Table)) or _is_aside(out[k])) and out[k].page == out[-1].page:
                 k -= 1
             tail = out[k] if k >= 0 else None
             if head is not None and tail is not None and tail.page == head.page - 1 and _joins(tail, head, stats):

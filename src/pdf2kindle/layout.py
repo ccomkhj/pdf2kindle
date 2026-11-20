@@ -18,7 +18,8 @@ from .textutil import ends_sentence, match_bullet, match_enum, norm_key
 
 STRONG_BULLETS = "•◦▪▫‣⁃∙●○■□▶►"
 _CAPTION = re.compile(r"^(Figure|Fig\.|Table|Listing|Example|Exhibit|그림|표)\s*[\dA-Z][\d.\-]*\s*[:.\u2013\u2014|-]\s", re.I)
-_NOTE_LABEL = re.compile(r"^\s*(\d{1,3}|[*†‡§¶]+)[.)]?\s*")
+# "12 Text", "12. Text", "* Text" - but not "2.1 Text" (a numbered exercise or heading)
+_NOTE_LABEL = re.compile(r"^\s*(\d{1,3}|[*†‡§¶]+)(?:[.)](?=\s)|(?=\s)|(?=[^\W\d]))\s*")
 
 
 @dataclass
@@ -79,6 +80,8 @@ def peel_footnotes(ctx: Context, pg: PageData, lines: list[Line]) -> tuple[list[
     tail = lines[k:]
     if not tail or k == 0:
         return lines, []
+    if len(tail) > 12 and len(tail) > 0.45 * len(lines):
+        return lines, []  # half a page of small print is not footnotes (exercises, a bibliography)
     # the zone must sit apart from the body above it
     gap = tail[0].baseline - lines[k - 1].baseline
     if gap < 1.15 * st.pitch and lines[k - 1].size > limit and not _NOTE_LABEL.match(tail[0].text):

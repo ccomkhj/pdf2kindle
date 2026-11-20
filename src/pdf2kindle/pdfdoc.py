@@ -73,46 +73,86 @@ def _merge_fragments(fragments: list[list[Span]], page: int) -> list[Line]:
     """Join MuPDF line fragments that share a baseline into visual lines.
 
     MuPDF starts a new "line" at every wide horizontal gap, which splits
-    aligned code and table rows into pieces; readers see one line.
+    aligned code and table rows into pieces; readers see one line. Exponents
+    and indices arrive as fragments of their own, a little above or below.
     """
-    items = []
-    for spans in fragments:
-        y0 = min(s.y0 for s in spans)
-        y1 = max(s.y1 for s in spans)
-        items.append([spans, spans[0].x0, spans[-1].x1, y0, y1])
-    items.sort(key=lambda it: (round(it[3] / 2), it[1]))
 
-    merged: list[list] = []
-    for it in items:
-        spans, x0, x1, y0, y1 = it
+    class Row:
+        __slots__ = ("parts", "x0", "x1", "y0", "y1", "size")
+
+        def __init__(self, spans: list[Span], satellite: bool = False):
+            self.parts = [(spans, satellite)]
+            self.x0, self.x1 = spans[0].x0, spans[-1].x1
+            self.y0 = min(s.y0 for s in spans)
+            self.y1 = max(s.y1 for s in spans)
+            self.size = max(spans, key=lambda s: len(s.text)).size
+
+        def clear_of(self, x0: float, x1: float) -> bool:
+            """No glyph of this row lies under [x0, x1]."""
+            return not any(s.x0 < x1 - 1.0 and s.x1 > x0 + 1.0 for spans, _ in self.parts for s in spans if s.text.strip())
+
+        def gap_to(self, x0: float, x1: float) -> float:
+            best = 1e9
+            for spans, _ in self.parts:
+                for s in spans:
+                    best = min(best, max(x0 - s.x1, s.x0 - x1, 0.0))
+            return best
+
+        def add(self, other: "Row", satellite: bool) -> None:
+            self.parts.extend((spans, satellite or sat) for spans, sat in other.parts)
+            self.x0, self.x1 = min(self.x0, other.x0), max(self.x1, other.x1)
+            if not satellite:
+                self.y0, self.y1 = min(self.y0, other.y0), max(self.y1, other.y1)
+
+    rows = sorted((Row(spans) for spans in fragments), key=lambda r: (round(r.y0 / 2), r.x0))
+
+    # pass 1: pieces of one line, left to right
+    lines: list[Row] = []
+    for row in rows:
         host = None
-        for m in reversed(merged[-12:]):
-            overlap = min(y1, m[4]) - max(y0, m[3])
-            if overlap <= 0.55 * min(y1 - y0, m[4] - m[3]):
+        for m in reversed(lines[-12:]):
+            overlap = min(row.y1, m.y1) - max(row.y0, m.y0)
+            if overlap <= 0.55 * min(row.y1 - row.y0, m.y1 - m.y0):
                 continue
-            if x0 >= m[2] - 1.0 or x1 <= m[1] + 1.0:
+            if abs(row.size - m.size) > 0.9 and m.gap_to(row.x0, row.x1) > 1.0 * max(row.size, m.size):
+                continue  # a margin note beside a body line, not part of it
+            if m.clear_of(row.x0, row.x1):
                 host = m
                 break
         if host is None:
-            merged.append([list(spans), x0, x1, y0, y1])
-            continue
-        if x0 >= host[2] - 1.0:  # append on the right
-            if not host[0][-1].text.endswith(" ") and not spans[0].text.startswith(" "):
-                host[0].append(_space_between(host[0][-1], x0))
-            host[0].extend(spans)
-        else:  # prepend on the left
-            lead = list(spans)
-            if not lead[-1].text.endswith(" ") and not host[0][0].text.startswith(" "):
-                lead.append(_space_between(lead[-1], host[1]))
-            host[0][:0] = lead
-        host[1] = min(host[1], x0)
-        host[2] = max(host[2], x1)
-        host[3] = min(host[3], y0)
-        host[4] = max(host[4], y1)
+            lines.append(row)
+        else:
+            host.add(row, satellite=False)
 
-    lines = [Line(spans=m[0], page=page) for m in merged]
-    lines.sort(key=lambda ln: (ln.baseline, ln.x0))
-    return lines
+    # pass 2: small raised or lowered pieces join the line they touch
+    final: list[Row] = []
+    for row in sorted(lines, key=lambda r: -r.size):
+        host = None
+        for m in final:
+            if row.size >= 0.85 * m.size or m.y1 < row.y0 or m.y0 > row.y1:
+                continue
+            overlap = min(row.y1, m.y1) - max(row.y0, m.y0)
+            if overlap > 0.25 * (row.y1 - row.y0) and m.gap_to(row.x0, row.x1) <= 0.6 * m.size and m.clear_of(row.x0, row.x1):
+                host = m
+                break
+        if host is None:
+            final.append(row)
+        else:
+            host.add(row, satellite=True)
+
+    out: list[Line] = []
+    for row in final:
+        tagged = sorted(((spans, sat) for spans, sat in row.parts), key=lambda part: part[0][0].x0)
+        spans: list[Span] = []
+        prev_sat = False
+        for part, sat in tagged:
+            if spans and not (sat or prev_sat) and not spans[-1].text.endswith(" ") and not part[0].text.startswith(" "):
+                spans.append(_space_between(spans[-1], part[0].x0))
+            spans.extend(part)
+            prev_sat = sat
+        out.append(Line(spans=spans, page=page))
+    out.sort(key=lambda ln: (ln.baseline, ln.x0))
+    return out
 
 
 def _read_links(page: pymupdf.Page, doc: pymupdf.Document) -> list[LinkRect]:

@@ -109,7 +109,13 @@ class Line:
             weight[(spans[0].font, round(spans[0].size * 2) / 2)] = 1
         self.font, self.size = max(weight.items(), key=lambda kv: kv[1])[0]
         dominant = [s for s in spans if (s.font, round(s.size * 2) / 2) == (self.font, self.size)] or spans
-        self.baseline = dominant[0].baseline
+        # the baseline most of the dominant text sits on (a synthetic space or
+        # an index in the same font must not define it)
+        votes: dict[float, int] = {}
+        for s in dominant:
+            key = round(s.baseline, 1)
+            votes[key] = votes.get(key, 0) + sum(1 for c in s.text if not c.isspace())
+        self.baseline = max(votes.items(), key=lambda kv: kv[1])[0] if votes else dominant[0].baseline
         self.y0 = min(s.y0 for s in dominant)
         self.y1 = max(s.y1 for s in dominant)
         self.mono_ratio = mono / total
