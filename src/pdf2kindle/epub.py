@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .config import Options
 from .inline import runs_text
-from .model import Block, Book, Code, Figure, Heading, ListItem, Note, Paragraph, Rule, Run, Table
+from .model import Block, Book, Code, Figure, Heading, ListItem, Paragraph, Rule, Run, Table
 
 _XML_BAD = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
 _SPLIT_CHARS = 280_000  # sub-split a section larger than this at the next heading level
@@ -186,10 +186,7 @@ class Writer:
             cls = f' class="{" ".join(classes)}"' if classes else ""
             return f"<p{cls}{self._idattr(b)}>{self._runs(b.runs, here)}</p>"
         if isinstance(b, Code):
-            lines = ["".join(self._code_run(r) for r in line) for line in b.lines]
-            longest = max((sum(len(r.text) for r in line) for line in b.lines), default=0)
-            cls = ' class="wide"' if longest > 62 else ""
-            return f"<pre{cls}{self._idattr(b)}><code>" + "\n".join(lines) + "</code></pre>"
+            return self._code(b)
         if isinstance(b, Figure):
             return self._figure(b, here, notes)
         if isinstance(b, Table):
@@ -197,6 +194,34 @@ class Writer:
         if isinstance(b, Rule):
             return "<hr/>"
         return ""
+
+    def _code(self, b: Code) -> str:
+        lines = ["".join(self._code_run(r) for r in line) for line in b.lines]
+        longest = max((sum(len(r.text) for r in line) for line in b.lines), default=0)
+        wide = " wide" if longest > 62 else ""
+        if self.opts.code_wrap != "hanging":
+            cls = f' class="{wide.strip()}"' if wide else ""
+            return f"<pre{cls}{self._idattr(b)}><code>" + "\n".join(lines) + "</code></pre>"
+        # One <pre> per source line. A line too long for the screen wraps
+        # with its continuation pushed three columns past the line's own
+        # indentation, so a wrapped line never looks like a new statement.
+        # The leading spaces stay in the text: if a renderer ignores the
+        # CSS, the listing degrades to an ordinary one instead of losing
+        # its indentation.
+        out = [f'<div class="code{wide}"{self._idattr(b)}>']
+        for line, markup in zip(b.lines, lines):
+            text = "".join(r.text for r in line)
+            if not text.strip():
+                out.append('<pre class="ln">&#160;</pre>')
+                continue
+            indent = len(text) - len(text.lstrip(" "))
+            style = ""
+            if indent:
+                em = round((indent + 3) * 0.6, 1)
+                style = f' style="padding-left: {em}em; text-indent: -{em}em"'
+            out.append(f'<pre class="ln"{style}>{markup}</pre>')
+        out.append("</div>")
+        return "\n".join(out)
 
     def _code_run(self, r: Run) -> str:
         text = esc(r.text)
@@ -226,7 +251,9 @@ class Writer:
             out.append(f"<caption>{self._runs(b.caption, here)}</caption>")
         for r, row in enumerate(b.rows):
             tag = "th" if b.header and r == 0 else "td"
-            cells = "".join(f"<{tag}>{esc(c).replace(chr(10), '<br/>')}</{tag}>" for c in row)
+            for cell in row:
+                self._collect_notes(cell, notes)
+            cells = "".join(f"<{tag}>{self._runs(cell, here)}</{tag}>" for cell in row)
             out.append(f"<tr>{cells}</tr>")
         out.append("</table>")
         return "\n".join(out)

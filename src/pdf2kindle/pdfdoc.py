@@ -14,6 +14,15 @@ _TEXT_FLAGS = pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_MEDIABOX_CLIP
 _DROP = {"­": "-", "​": "", "﻿": "", " ": " ", " ": " ", "\t": " "}
 
 
+def _font_name(name: str) -> str:
+    """Stable font name: no subset tag, no per-object Type 3 numbering."""
+    if name.startswith("Type3"):
+        return "Type3"
+    if len(name) > 7 and name[6] == "+" and name[:6].isupper():
+        return name[7:]
+    return name
+
+
 def _make_span(raw: dict) -> Span | None:
     chars = raw["chars"]
     if not chars:
@@ -40,7 +49,7 @@ def _make_span(raw: dict) -> Span | None:
         y0=bbox[1],
         y1=bbox[3],
         baseline=raw["origin"][1],
-        font=raw["font"],
+        font=_font_name(raw["font"]),
         size=raw["size"],
         flags=raw["flags"],
     )
@@ -157,8 +166,8 @@ def load_page(doc: pymupdf.Document, index: int) -> PageData:
                 spans.pop(0)
             while spans and not spans[-1].text.strip():
                 spans.pop()
-            if not spans:
-                continue
+            if not spans or not any(c not in " \ufffd" for s in spans for c in s.text):
+                continue  # nothing but glyphs the PDF gives no meaning for
             n_chars += sum(len(s.text) for s in spans)
             fragments.append(spans)
 

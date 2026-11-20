@@ -29,6 +29,9 @@ class Options:
     split_level: int = 1  # heading level that starts a new EPUB file
     toc_depth: int = 3
 
+    # extra regular expressions; any line matching one in full is discarded
+    drop_lines: list[str] = field(default_factory=list)
+
     # margins to ignore, as fractions of the page (top, right, bottom, left)
     crop: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0])
 
@@ -42,6 +45,10 @@ class Options:
     jpeg_quality: int = 85
     tables: str = "auto"  # auto | html | image
     cover: str = "auto"  # auto | none | path to an image
+
+    # code listings: "hanging" marks wrapped lines by indenting their
+    # continuation; "plain" emits one ordinary <pre> per listing
+    code_wrap: str = "hanging"
 
     # footnotes
     footnotes: bool = True

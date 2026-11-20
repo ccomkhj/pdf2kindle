@@ -1,0 +1,35 @@
+# Per-book profile: pdf2kindle convert book.pdf --profile book.toml
+# Every key is optional; these are the defaults unless noted.
+
+# title = "The Book Title"        # default: PDF metadata, else the largest type on page 1
+# author = "A. N. Author"
+# language = "en"                 # BCP 47; guessed from the text when omitted
+
+# pages = "1-"                    # what to convert, e.g. "12-340"
+# skip_pages = "3-6,341-360"      # e.g. adverts, a licence appendix
+
+drop_toc_pages = true             # the printed contents pages (real navigation replaces them)
+drop_index = true                 # the back-of-book index (its page numbers mean nothing on a Kindle)
+split_level = 1                   # heading level that starts a new file inside the EPUB
+toc_depth = 3                     # heading levels shown in the Kindle "Go to" menu
+
+# Ignore a strip at the page edges: top, right, bottom, left as fractions of
+# the page. Use when a running head or a watermark survives detection.
+crop = [0.0, 0.0, 0.0, 0.0]
+
+# Lines to throw away wherever they appear (regular expressions, full match).
+drop_lines = []                   # e.g. ["Licensed to .*", "www\\.example\\.com"]
+
+# Fonts the PDF does not flag as fixed-width but which are code (substring
+# match on the names that `pdf2kindle inspect` prints), and the reverse.
+mono_fonts = []                   # e.g. ["UbuntuMono", "LetterGothic"]
+not_mono_fonts = []
+
+code_wrap = "hanging"             # "hanging": wrapped code lines are indented; "plain": one <pre> per listing
+tables = "auto"                   # "auto": HTML when the grid is certain, else an image; "html"; "image"
+footnotes = true                  # turn page-bottom notes into Kindle pop-up footnotes
+
+image_width = 1600                # pixels for a figure as wide as the text block
+image_max_dpi = 400
+jpeg_quality = 85
+cover = "auto"                    # "auto" (first page), "none", or a path to an image

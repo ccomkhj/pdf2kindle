@@ -16,11 +16,20 @@ from .layout import Context, OutlineEntry, PageFlow, peel_footnotes, pin_outline
 from .model import Block, Book, Code, Figure, Heading, ListItem, Note, PageData, Paragraph, Run, Table
 from .pdfdoc import dest_y, load_page
 from .stats import mark_furniture, measure
-from .textutil import is_page_label, norm_key
+from .textutil import is_page_label
 
-_INDEX_TITLE = re.compile(r"^(concept |general |subject |function |variable |keyword )?index( of .*)?$|^색인$|^찾아보기$", re.I)
+_INDEX_TITLE = re.compile(r"^((\w+ ){0,4}index(es)?|index(es)? of .*)$|^색인$|^찾아보기$", re.I)
+_CONTENTS_TITLE = re.compile(r"^(table of )?contents$|^brief contents$|^short contents$|^목차$|^차례$", re.I)
+_LOOSE_CAPTION = re.compile(r"^(Figure|Fig\.|Table|Listing|그림|표)\s*\d", re.I)
 _LEADER = re.compile(r"(\.\s*){4,}\s*\S{1,6}\s*$")
 _WORD = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)*", re.UNICODE)
+
+# Typesetter droppings that mean nothing once the text reflows.
+_ARTIFACTS = [
+    r"\(continue[sd] (on|from) (the )?(next|previous) page\)",
+    r"(\(continue[sd] (on|from) (the )?(next|previous) page\)\s*){2}",
+    r"this page (is )?intentionally (left )?blank\.?",
+]
 
 Progress = Callable[[str, int, int], None]
 
@@ -41,6 +50,8 @@ def convert(
     wanted = parse_ranges(opts.pages, n) if opts.pages else set(range(n))
     wanted -= parse_ranges(opts.skip_pages, n) if opts.skip_pages else set()
 
+    artifact = re.compile("^(?:" + "|".join(_ARTIFACTS + list(opts.drop_lines)) + ")$", re.I)
+
     # ---- pass 1: raw lines -------------------------------------------------
     pages: list[PageData] = []
     for i in range(n):
@@ -49,6 +60,7 @@ def convert(
             pg = load_page(doc, i)
             _apply_font_overrides(pg, opts)
             _apply_crop(pg, opts)
+            pg.lines = [ln for ln in pg.lines if not artifact.match(ln.text.strip())]
         else:
             r = doc[i].rect
             pg = PageData(index=i, width=r.width, height=r.height, lines=[])
@@ -150,12 +162,10 @@ def _read_outline(doc: pymupdf.Document) -> list[OutlineEntry]:
 def _find_toc_pages(pages: list[PageData]) -> set[int]:
     """Pages that are a printed table of contents: mostly lines ending in a
     page number after dot leaders or a wide gap."""
-    out: set[int] = set()
     limit = max(12, len(pages) // 4)
+    share: dict[int, tuple[int, int]] = {}
     for pg in pages[:limit]:
         lines = [ln for ln in pg.lines if ln.role != "furniture"]
-        if len(lines) < 5:
-            continue
         hits = 0
         for ln in lines:
             text = ln.text.rstrip()
@@ -167,23 +177,30 @@ def _find_toc_pages(pages: list[PageData]) -> set[int]:
                 last = [s for s in ln.spans if s.text.strip()]
                 if len(last) >= 2 and last[-1].x0 - last[-2].x1 > 1.5 * ln.size:
                     hits += 1
-        if hits >= 0.5 * len(lines):
-            out.add(pg.index)
-    # a contents listing runs over consecutive pages; isolated hits deep in the
-    # book are tables, not contents
-    if out:
-        first = min(out)
-        keep = {first}
-        cur = first
-        while cur + 1 in out:
+        share[pg.index] = (hits, len(lines))
+    titled = {
+        pg.index
+        for pg in pages[:limit]
+        if any(_CONTENTS_TITLE.match(ln.text.strip()) for ln in pg.lines[:6] if ln.role != "furniture")
+    }
+    strong = sorted(
+        i
+        for i, (h, n) in share.items()
+        if (n >= 5 and h >= 0.5 * n) or (i in titled and n >= 3 and h >= 0.5 * (n - 1))
+    )
+    if not strong:
+        return set()
+    # a contents listing runs over consecutive pages; later isolated hits are
+    # tables. Its last page may hold only a few lines.
+    out = {strong[0]}
+    cur = strong[0]
+    while True:
+        h, n = share.get(cur + 1, (0, 0))
+        if n >= 1 and h >= 0.5 * n:
             cur += 1
-            keep.add(cur)
-        for p in sorted(out):
-            if p > cur + 2:
-                break
-            keep.add(p)
-            cur = max(cur, p)
-        out = keep
+            out.add(cur)
+        else:
+            break
     return out
 
 
@@ -201,12 +218,16 @@ def _page_blocks(
     lines, notes = peel_footnotes(ctx, pg, lines)
     ctx.notes.extend(notes)
     pinned = pin_outline(ctx, pg, lines)
-    blocks = PageFlow(ctx, pg, lines).run(pinned)
+    blocks = PageFlow(ctx, pg, lines, bullets=found.bullets).run(pinned)
     blocks.extend(found.blocks)
     for box in found.boxes:
-        for b in blocks:
-            if b.y >= box.y0 - 2 and b.y_end <= box.y1 + 2:
+        held = [b for b in blocks if b.y >= box.y0 - 2 and b.y_end <= box.y1 + 2]
+        if any(not isinstance(b, Code) for b in held):  # a frame around a listing adds nothing
+            inset = min((b.indent for b in held if isinstance(b, Paragraph)), default=0)
+            for b in held:
                 b.boxed = True
+                if isinstance(b, Paragraph):
+                    b.indent -= inset  # the box padding is not an indent
     # outline entries nothing on the page matched: keep them as invisible anchors
     for entry in ctx.outline.get(pg.index, []):
         if not entry.matched:
@@ -249,16 +270,31 @@ def _settle_headings(ctx: Context, blocks: list[Block], outline: list[OutlineEnt
             key=lambda sig: -float(sig.rsplit("|", 1)[1]),
         )
         # one-off display type at the very start is the title page, not a chapter
-        while len(ranked) > 1 and counts[ranked[0]] == 1 and first_page[ranked[0]] <= 2:
-            ranked.pop(0)
+        ranked = [sig for sig in ranked if not (counts[sig] == 1 and first_page[sig] <= 1)] or ranked[:1]
         for rank, sig in enumerate(ranked[:4]):
             level_of[sig] = rank + 1
+    first_real = min((e.page for e in outline if e.matched), default=0) if has_outline else 0
+    # "CHAPTER / ONE" lines printed above a chapter title are a label for it
+    labels: set[int] = set()
+    for i, b in enumerate(blocks):
+        if isinstance(b, Heading) and b.level == 1 and b.runs:
+            j = i - 1
+            while j >= 0 and isinstance(blocks[j], Paragraph) and blocks[j].kind == "subhead" and blocks[j].page == b.page:
+                if len(runs_text(blocks[j].runs)) > 40:
+                    break
+                labels.add(j)
+                j -= 1
     for i, b in enumerate(blocks):
         if not (isinstance(b, Paragraph) and b.kind == "subhead"):
             continue
         sig, b.anchor = b.anchor, ""
         level = level_of.get(sig)
-        if level:
+        if i in labels:
+            b.kind = "label"
+            for r in b.runs:
+                r.bold = False
+            continue
+        if level and b.page >= first_real:  # display type before the first chapter is the title page
             for r in b.runs:
                 r.bold = False
             blocks[i] = Heading(
@@ -284,6 +320,14 @@ def _drop_index(blocks: list[Block], opts: Options, book: Book) -> list[Block]:
     return out
 
 
+def _is_caption(p: Paragraph) -> bool:
+    if p.kind == "caption":
+        return True
+    # directly under a figure, "Figure 3 Title" without punctuation still counts
+    text = runs_text(p.runs)
+    return p.kind == "p" and len(text) < 160 and bool(_LOOSE_CAPTION.match(text)) and not text.rstrip().endswith(".")
+
+
 def _attach_captions(blocks: list[Block]) -> list[Block]:
     out: list[Block] = []
     skip = False
@@ -294,7 +338,7 @@ def _attach_captions(blocks: list[Block]) -> list[Block]:
         if isinstance(b, (Figure, Table)) and not b.caption:
             nxt = blocks[i + 1] if i + 1 < len(blocks) else None
             prev = out[-1] if out else None
-            if isinstance(nxt, Paragraph) and nxt.kind == "caption" and nxt.page == b.page and nxt.y - b.y_end < 40:
+            if isinstance(nxt, Paragraph) and _is_caption(nxt) and nxt.page == b.page and nxt.y - b.y_end < 40:
                 b.caption = nxt.runs
                 skip = True
             elif isinstance(prev, Paragraph) and prev.kind == "caption" and prev.page == b.page and b.y - prev.y_end < 40:
@@ -370,6 +414,10 @@ def _iter_runs(blocks: list[Block], notes: list[Note]):
             yield from b.runs
         if isinstance(b, (Figure, Table)):
             yield from b.caption
+        if isinstance(b, Table):
+            for row in b.rows:
+                for cell in row:
+                    yield from cell
     for note in notes:
         yield from note.runs
 
@@ -381,23 +429,51 @@ def _link_footnotes(blocks: list[Block], book: Book) -> None:
     for idx, note in enumerate(book.notes):
         by_page.setdefault(note.page, {}).setdefault(note.label, idx)
     linked = 0
+
+    def split_label(label: str, page: int) -> list[str] | None:
+        """'45' -> ['4', '5'] when two markers were set side by side."""
+        known = by_page.get(page, {})
+        if not label.isdigit() or len(label) < 2:
+            return None
+        for cut in range(1, len(label)):
+            a, b = label[:cut], label[cut:]
+            if a in known and (b in known or split_label(b, page)):
+                return [a] + (split_label(b, page) or [b])
+        return None
+
     # same page first, so a "1" on the facing page cannot steal the note
     for offsets in ((0,), (1, -1)):
         for b in blocks:
             if not isinstance(b, (Paragraph, ListItem)):
                 continue
+            new_runs: list[Run] = []
             for r in b.runs:
                 if not r.sup or r.note >= 0:
+                    new_runs.append(r)
                     continue
                 label = r.text.strip().strip(".,)")
+                parts = [label]
                 for off in offsets:
-                    idx = by_page.get(b.page + off, {}).get(label)
-                    if idx is not None and not book.notes[idx].referenced:
-                        r.note = idx
-                        r.text = label
-                        book.notes[idx].referenced = True
-                        linked += 1
-                        break
+                    if label not in by_page.get(b.page + off, {}):
+                        parts = split_label(label, b.page + off) or parts
+                        if len(parts) > 1:
+                            break
+                made = []
+                for part in parts:
+                    piece = Run(part, sup=True) if len(parts) > 1 else r
+                    for off in offsets:
+                        idx = by_page.get(b.page + off, {}).get(part)
+                        if idx is not None and not book.notes[idx].referenced:
+                            piece.note = idx
+                            piece.text = part
+                            book.notes[idx].referenced = True
+                            linked += 1
+                            break
+                    made.append(piece)
+                if len(parts) > 1 and all(m.note < 0 for m in made):
+                    made = [r]
+                new_runs.extend(made)
+            b.runs = new_runs
     # notes nobody points at still belong in the book: keep them after the
     # last block of their page
     orphans = [n for n in book.notes if not n.referenced]
@@ -424,31 +500,34 @@ def _resolve_hyphens(blocks: list[Block], book: Book) -> None:
     joined = kept = 0
     pat = re.compile(r"([^\W\d_]+)" + SOFT + r"([^\W\d_]+)", re.UNICODE)
 
-    def decide(m: re.Match) -> str:
+    def keep_hyphen(a: str, b: str) -> bool:
         nonlocal joined, kept
-        a, b = m.group(1), m.group(2)
         solid = vocab.get((a + b).lower(), 0)
         hyph = vocab.get((a + "-" + b).lower(), 0)
-        if hyph > solid:
+        keep = hyph > solid
+        if not solid and not hyph:
+            # unseen either way: two ordinary words of the book joined by a
+            # hyphen ("pattern-matching") are a compound, not a broken word
+            keep = len(a) >= 4 and len(b) >= 4 and vocab.get(a.lower(), 0) >= 3 and vocab.get(b.lower(), 0) >= 3
+        if keep:
             kept += 1
-            return a + "-" + b
-        joined += 1
-        return a + b
+        else:
+            joined += 1
+        return keep
+
+    def decide(m: re.Match) -> str:
+        a, b = m.group(1), m.group(2)
+        return a + ("-" if keep_hyphen(a, b) else "") + b
 
     for idx, r in enumerate(runs):
         if SOFT not in r.text:
             continue
         if r.text.endswith(SOFT) and idx + 1 < len(runs):
             # the word continues in the next run (style change at the break)
-            nxt = runs[idx + 1]
-            m = re.match(r"[^\W\d_]+", nxt.text, re.UNICODE)
+            m = re.match(r"[^\W\d_]+", runs[idx + 1].text, re.UNICODE)
             m0 = re.search(r"[^\W\d_]+$", r.text[:-1], re.UNICODE)
             if m and m0:
-                a, b = m0.group(0), m.group(0)
-                solid = vocab.get((a + b).lower(), 0)
-                hyph = vocab.get((a + "-" + b).lower(), 0)
-                r.text = r.text[:-1] + ("-" if hyph > solid else "")
-                continue
+                r.text = r.text[:-1] + ("-" if keep_hyphen(m0.group(0), m.group(0)) else "")
         r.text = pat.sub(decide, r.text).replace(SOFT, "")
     book.stats["hyphens_joined"] = joined
     book.stats["hyphens_kept"] = kept

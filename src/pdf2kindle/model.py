@@ -238,7 +238,7 @@ class Figure(Block):
 
 @dataclass(slots=True)
 class Table(Block):
-    rows: list[list[str]] = field(default_factory=list)
+    rows: list[list[list[Run]]] = field(default_factory=list)  # rows -> cells -> runs
     header: bool = False
     caption: list[Run] = field(default_factory=list)
 

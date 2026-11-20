@@ -14,6 +14,7 @@ SOFT = "\x01"
 
 _CJK = re.compile(r"[぀-ヿ㐀-鿿豈-﫿＀-￯]")
 _WS = re.compile(r"[ \t\r\n]+")
+_PATHISH = re.compile(r"(?:\S*/\S+/|\w+://\S*/)$")
 
 
 def _style_of(span: Span, line_size: float) -> tuple[bool, bool, bool, bool]:
@@ -64,7 +65,8 @@ def line_runs(line: Line, links: list[LinkRect], skip_chars: int = 0) -> list[Ru
                 run = Run(text[seg_start:i], bold, italic, mono, sup)
                 if current is not None:
                     if current.uri:
-                        run.href = current.uri
+                        if current.uri.lower().startswith(("http://", "https://", "mailto:", "ftp://")):
+                            run.href = current.uri
                     else:
                         run.target = (current.page, current.dest_y)
                 _push(runs, run)
@@ -107,6 +109,8 @@ def join_lines(per_line: list[list[Run]]) -> list[Run]:
                 last.text = tail[:-1] + SOFT
             elif len(tail) >= 2 and tail[-1] in "-‐" and last.mono and runs[0].mono:
                 last.text = tail  # option names and the like: keep, no space
+            elif tail.endswith("/") and head[:1].isalnum() and _PATHISH.search(tail):
+                last.text = tail  # a path or URL broken after a slash
             elif tail and head and _CJK.match(tail[-1]) and _CJK.match(head[0]):
                 last.text = tail
             else:
@@ -116,30 +120,44 @@ def join_lines(per_line: list[list[Run]]) -> list[Run]:
     return tidy_runs(out)
 
 
+def _styled(r: Run) -> bool:
+    return bool(r.bold or r.italic or r.mono or r.sup or r.href or r.target or r.note >= 0)
+
+
 def tidy_runs(runs: list[Run]) -> list[Run]:
-    out: list[Run] = []
+    """Collapse whitespace, keep spaces outside styled runs ("<i>word</i> next",
+    never "<i>word </i>next") and merge neighbours that share a style."""
+    pieces: list[Run] = []
     for r in runs:
-        r.text = clean_text(_WS.sub(" ", r.text))
-        if not r.text:
+        text = clean_text(_WS.sub(" ", r.text))
+        if not text:
             continue
+        if not _styled(r) or not text.strip():
+            pieces.append(Run(text))
+            continue
+        if text[0] == " ":
+            pieces.append(Run(" "))
+        r.text = text.strip()
+        pieces.append(r)
+        if text[-1] == " ":
+            pieces.append(Run(" "))
+    out: list[Run] = []
+    for r in pieces:
         if out and out[-1].text.endswith(" ") and r.text.startswith(" "):
-            r.text = r.text[1:]
+            r.text = r.text.lstrip(" ")
             if not r.text:
                 continue
         if out and out[-1].same_style(r):
             out[-1].text += r.text
         else:
             out.append(r)
+    while out and not out[0].text.strip():
+        out.pop(0)
+    while out and not out[-1].text.strip():
+        out.pop()
     if out:
         out[0].text = out[0].text.lstrip()
         out[-1].text = out[-1].text.rstrip()
-        out = [r for r in out if r.text]
-    # keep leading/trailing spaces outside styled runs: "<i>word </i>next" reads badly
-    for i, r in enumerate(out):
-        if (r.bold or r.italic or r.mono or r.sup or r.href or r.target) and r.text != r.text.rstrip() and i + 1 < len(out):
-            r.text = r.text.rstrip()
-            if not out[i + 1].text.startswith(" "):
-                out[i + 1].text = " " + out[i + 1].text
     return out
 
 

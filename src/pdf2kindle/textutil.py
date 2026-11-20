@@ -54,9 +54,33 @@ def ends_sentence(text: str) -> bool:
     return bool(_SENT_END.search(text.rstrip()))
 
 
+# TeX sets an accented letter as two glyphs: the accent, then the base letter.
+_ACCENTS = {
+    "¨": "̈",  # diaeresis
+    "´": "́",  # acute
+    "ˆ": "̂",  # circumflex
+    "˜": "̃",  # tilde
+    "ˇ": "̌",  # caron
+    "˘": "̆",  # breve
+    "˙": "̇",  # dot above
+    "˚": "̊",  # ring
+    "¯": "̄",  # macron
+    "¸": "̧",  # cedilla
+}
+_ACCENT_PAIR = re.compile("([" + "".join(_ACCENTS) + "]) ?([A-Za-zıȷ])")
+
+
+def _compose(m: re.Match) -> str:
+    base = {"ı": "i", "ȷ": "j"}.get(m.group(2), m.group(2))
+    composed = unicodedata.normalize("NFC", base + _ACCENTS[m.group(1)])
+    return composed if len(composed) == 1 else m.group(0)
+
+
 def clean_text(text: str) -> str:
-    """Normalise presentation forms (ligatures and friends) without touching
-    ordinary punctuation or CJK."""
+    """Normalise presentation forms (ligatures, detached accents) without
+    touching ordinary punctuation or CJK."""
     if any("ﬀ" <= c <= "ﬆ" for c in text):
         text = "".join(unicodedata.normalize("NFKC", c) if "ﬀ" <= c <= "ﬆ" else c for c in text)
+    if any(c in _ACCENTS for c in text):
+        text = _ACCENT_PAIR.sub(_compose, text)
     return text

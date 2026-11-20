@@ -12,12 +12,12 @@ import re
 from dataclasses import dataclass, field
 
 from .inline import SOFT, code_lines, first_word_width, join_lines, line_runs, runs_text, tidy_runs
-from .model import Block, Code, Heading, Line, ListItem, Note, PageData, Paragraph, Run
+from .model import Block, Code, Heading, Line, ListItem, Note, PageData, Paragraph
 from .stats import DocStats
-from .textutil import BULLETS, ends_sentence, match_bullet, match_enum, norm_key
+from .textutil import ends_sentence, match_bullet, match_enum, norm_key
 
 STRONG_BULLETS = "•◦▪▫‣⁃∙●○■□▶►"
-_CAPTION = re.compile(r"^(Figure|Fig\.|Table|Listing|Example|Exhibit|그림|표)\s*\d+", re.I)
+_CAPTION = re.compile(r"^(Figure|Fig\.|Table|Listing|Example|Exhibit|그림|표)\s*[\dA-Z][\d.\-]*\s*[:.\u2013\u2014|-]\s", re.I)
 _NOTE_LABEL = re.compile(r"^\s*(\d{1,3}|[*†‡§¶]+)[.)]?\s*")
 
 
@@ -155,7 +155,7 @@ def pin_outline(ctx: Context, pg: PageData, lines: list[Line]) -> dict[int, tupl
                 score = _title_score(want, joined)
                 if score <= 0:
                     continue
-                styled = heading_like(ln, st)
+                styled = heading_like(ln, st) or (ln.bold_ratio >= 0.25 and len(ln.text) < 90)
                 if not styled and score < 1.0:
                     continue
                 score += 0.5 if styled else 0.0
@@ -218,15 +218,30 @@ def _title_score(want: str, got: str) -> float:
 # the flow
 # --------------------------------------------------------------------------
 class PageFlow:
-    def __init__(self, ctx: Context, pg: PageData, lines: list[Line], left: float | None = None, right: float | None = None):
+    def __init__(
+        self,
+        ctx: Context,
+        pg: PageData,
+        lines: list[Line],
+        bullets: list | None = None,
+    ):
         self.ctx = ctx
         self.pg = pg
         self.st = ctx.stats
         self.lines = lines
-        self.left = ctx.stats.left[pg.index] if left is None else left
-        self.right = ctx.stats.right[pg.index] if right is None else right
+        self.left = ctx.stats.left[pg.index]
+        self.right = ctx.stats.right[pg.index]
         self.blocks: list[Block] = []
         self.measure = self._measures()
+        # lines whose bullet is a drawn shape rather than a character
+        self.drawn: dict[int, float] = {}
+        em = ctx.stats.body_size
+        for mark in bullets or []:
+            cy = (mark.y0 + mark.y1) / 2
+            for ln in lines:
+                if ln.y0 <= cy <= ln.y1 and -1 <= ln.x0 - mark.x1 <= 2.2 * em:
+                    self.drawn[id(ln)] = mark.x0
+                    break
 
     # -- helpers ------------------------------------------------------------
     def _measures(self) -> dict[int, float]:
@@ -235,8 +250,9 @@ class PageFlow:
         Usually the page's, but text set to a narrower measure (quotations,
         admonitions) must be judged against its own margin, or every one of
         its lines looks like it "ended early". A stanza is a run of lines
-        with no vertical break; it has its own margin when it is inset on
-        both sides alike or at least two of its lines end flush.
+        at even line spacing (in practice one paragraph); it has its own
+        margin when it is inset on both sides alike or at least two of its
+        lines end flush.
         """
         st = self.st
         out: dict[int, float] = {}
@@ -264,7 +280,7 @@ class PageFlow:
                 continue
             if prev is not None:
                 gap = ln.baseline - prev.baseline
-                if gap <= 0 or gap > 1.45 * st.pitch_for(prev.size):
+                if gap <= 0 or gap > 1.12 * st.pitch_for(prev.size):
                     close()
             stanza.append(ln)
             prev = ln
@@ -308,6 +324,8 @@ class PageFlow:
         return True
 
     def _starts_item(self, ln: Line, forced_only: bool = False) -> bool:
+        if id(ln) in self.drawn:
+            return True
         text = ln.text
         m = match_bullet(text)
         if m:
@@ -359,7 +377,7 @@ class PageFlow:
             if para and self._continues(para, ln):
                 para.append(ln)
             else:
-                self._flush(para)
+                self._flush(para, ln)
                 para = [ln]
             i += 1
         self._flush(para)
@@ -385,6 +403,16 @@ class PageFlow:
     def _emit_code(self, group: list[Line], after: Line | None) -> None:
         st = self.st
         first = group[0]
+        # a monospace term at the margin with its synopsis set far to the
+        # right below it: emit the term, then the synopsis as its own listing
+        if (
+            len(group) >= 2
+            and first.x1 - first.x0 < 0.5 * (self.right - self.left)
+            and all(ln.x0 >= first.x0 + 4.5 * st.body_size for ln in group[1:])
+        ):
+            self._emit_term(first)
+            self._emit_code(group[1:], after)
+            return
         # a lone short monospace line directly above indented prose is a
         # definition term, not a listing
         if (
@@ -395,19 +423,7 @@ class PageFlow:
             and 0 < after.baseline - first.baseline <= 1.3 * st.pitch
             and first.x1 - first.x0 < 0.7 * (self.right - self.left)
         ):
-            first.role = "term"
-            self.blocks.append(
-                Paragraph(
-                    page=self.pg.index,
-                    y=first.y0,
-                    y_end=first.y1,
-                    runs=tidy_runs(line_runs(first, self.pg.links)),
-                    kind="term",
-                    indent=self._indent(first.x0),
-                    right=self.right,
-                    last_x1=first.x1,
-                )
-            )
+            self._emit_term(first)
             return
         for ln in group:
             ln.role = "code"
@@ -421,6 +437,21 @@ class PageFlow:
             )
         )
 
+    def _emit_term(self, line: Line) -> None:
+        line.role = "term"
+        self.blocks.append(
+            Paragraph(
+                page=self.pg.index,
+                y=line.y0,
+                y_end=line.y1,
+                runs=tidy_runs(line_runs(line, self.pg.links)),
+                kind="term",
+                indent=self._indent(line.x0),
+                right=self.right,
+                last_x1=line.x1,
+            )
+        )
+
     def _indent(self, x: float) -> int:
         em = self.st.body_size
         off = x - self.left
@@ -428,7 +459,7 @@ class PageFlow:
             return 0
         return max(1, min(4, int(round(off / (2.2 * em)))))
 
-    def _flush(self, para: list[Line]) -> None:
+    def _flush(self, para: list[Line], after: Line | None = None) -> None:
         if not para:
             return
         st = self.st
@@ -437,25 +468,28 @@ class PageFlow:
         em = st.body_size
         text0 = first.text
 
+        # a short line sitting directly above more deeply indented prose is
+        # the term of a definition list
+        if (
+            len(para) == 1
+            and after is not None
+            and after.x0 >= first.x0 + 1.5 * em
+            and 0 < after.baseline - first.baseline <= 1.3 * st.pitch
+            and first.x1 - first.x0 < 0.7 * (self.right - self.left)
+            and not self._starts_item(first)
+            and not heading_like(first, st)
+            and not ends_sentence(text0)
+        ):
+            self._emit_term(first)
+            return
+
         # definition list: "TERM      description that wraps
         #                            under the description"
         if len(para) >= 2 and para[1].x0 - first.x0 > 1.5 * em:
             cut = _gap_split(first, para[1].x0, em)
             if cut is not None:
                 term_line, rest_line = cut
-                term_line.role = "term"
-                self.blocks.append(
-                    Paragraph(
-                        page=pg.index,
-                        y=first.y0,
-                        y_end=first.y1,
-                        runs=tidy_runs(line_runs(term_line, pg.links)),
-                        kind="term",
-                        indent=self._indent(first.x0),
-                        right=self.right,
-                        last_x1=term_line.x1,
-                    )
-                )
+                self._emit_term(term_line)
                 self._flush([rest_line] + para[1:])
                 return
 
@@ -470,8 +504,11 @@ class PageFlow:
         if enum and heading_like(first, st):
             enum = None
         m = bullet or enum
-        if m:
-            per_line = [line_runs(first, pg.links, skip_chars=m.end())] + [line_runs(ln, pg.links) for ln in para[1:]]
+        drawn = self.drawn.get(id(first))
+        if m or drawn is not None:
+            skip = m.end() if m and drawn is None else 0
+            per_line = [line_runs(first, pg.links, skip_chars=skip)] + [line_runs(ln, pg.links) for ln in para[1:]]
+            item_x = first.x0 if drawn is None else drawn
             for ln in para:
                 ln.role = "list"
             last = para[-1]
@@ -481,9 +518,9 @@ class PageFlow:
                     y=first.y0,
                     y_end=last.y1,
                     runs=join_lines(per_line),
-                    marker=m.group(1),
-                    ordered=enum is not None,
-                    level=int(round((first.x0 - self.left) / em)),
+                    marker="\u2022" if drawn is not None else m.group(1),
+                    ordered=enum is not None and drawn is None,
+                    level=int(round((item_x - self.left) / em)),
                     open_end=self._open_end(para),
                     last_x1=last.x1,
                     right=self._para_right(para),
@@ -503,6 +540,8 @@ class PageFlow:
             len(para) == 1
             and first.x0 - self.left > 2 * em
             and abs((first.x0 - self.left) - (self.right - first.x1)) < 1.5 * em
+            and first.x1 - first.x0 < 0.75 * (self.right - self.left)
+            and not any(o is not first and abs(o.x0 - first.x0) < 1.0 for o in self.lines)
         ):
             kind = "center"
         for ln in para:
