@@ -208,6 +208,8 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
         covered = sum((pymupdf.Rect(ln.x0, ln.y0, ln.x1, ln.y1) & c).get_area() for ln in inside)
         if c.width < 0.5 * text_width and covered > 0.4 * c.get_area():
             continue  # a keycap, badge or similar frame drawn around words
+        if inside and sum(1 for ln in inside if _is_code(ln)) >= 0.7 * len(inside) and covered > 0.15 * c.get_area():
+            continue  # decoration around a code listing: keep the code as text
         long_lines = sum(1 for ln in inside if ln.x1 - ln.x0 > 0.7 * c.width)
         if long_lines >= 5 and c.width > 0.6 * text_width:
             # running text inside a decorated frame: keep the text as text
@@ -381,13 +383,19 @@ def _body_between(lines: list[Line], a, b, left: float, em: float) -> bool:
 
 
 def _is_box(c: pymupdf.Rect, members: list[dict]) -> bool:
-    """A frame or tinted panel: nothing but a few straight edges hugging the
-    cluster's border (or one rectangle filling it)."""
+    """A frame or tinted panel: one shape filling the cluster (square or
+    round-cornered), or nothing but a few straight edges hugging its border."""
     items = 0
     for d in members:
         r = d["rect"]
+        items += len(d["items"])
+        if r.width > 0.9 * c.width and r.height > 0.9 * c.height:
+            # a panel; its outline may only run along the border (corners
+            # included), never across the interior
+            if all(_on_border(pt, r) for it in d["items"] for pt in _points(it)):
+                continue
+            return False
         for it in d["items"]:
-            items += 1
             if it[0] not in ("l", "re", "qu"):
                 return False
             if it[0] == "l":
@@ -395,16 +403,26 @@ def _is_box(c: pymupdf.Rect, members: list[dict]) -> bool:
                 if abs(p1.x - p2.x) > 1 and abs(p1.y - p2.y) > 1:
                     return False  # diagonal stroke
         thin = r.width < 3 or r.height < 3
-        fills = r.width > 0.9 * c.width and r.height > 0.9 * c.height
         on_edge = (
             abs(r.x0 - c.x0) < 4 and abs(r.x1 - c.x0) < 4
             or abs(r.x0 - c.x1) < 4 and abs(r.x1 - c.x1) < 4
             or abs(r.y0 - c.y0) < 4 and abs(r.y1 - c.y0) < 4
             or abs(r.y0 - c.y1) < 4 and abs(r.y1 - c.y1) < 4
         )
-        if not (fills or (thin and on_edge) or (r.width < 4 and r.height < 4)):
+        if not ((thin and on_edge) or (r.width < 4 and r.height < 4)):
             return False
-    return items <= 40
+    return items <= 60
+
+
+def _points(item: tuple) -> list:
+    if item[0] in ("re", "qu"):
+        q = item[1].rect if item[0] == "qu" else item[1]
+        return [q.tl, q.tr, q.bl, q.br]
+    return [p for p in item[1:] if isinstance(p, pymupdf.Point)]
+
+
+def _on_border(pt, r: pymupdf.Rect, tol: float = 12.0) -> bool:
+    return min(abs(pt.x - r.x0), abs(pt.x - r.x1), abs(pt.y - r.y0), abs(pt.y - r.y1)) <= tol
 
 
 def _merge_rects(rects: list[pymupdf.Rect], tol: float) -> list[pymupdf.Rect]:
@@ -537,6 +555,10 @@ def _aligned_rows(inside: list[Line], em: float, pg: PageData):
 
     per_line = [_pieces(ln, em) for ln in inside]
     edges = sorted(p.x0 for pieces in per_line for p in pieces)
+    n_left_edges = _count_anchors(edges)
+    rivers = _river_columns(inside, em)
+    if len(rivers) >= 2 and len(rivers) >= n_left_edges:
+        return _river_rows(inside, rivers, pg)
     clusters: list[list[float]] = []
     for x in edges:
         if clusters and x - clusters[-1][-1] <= 2.5:
@@ -558,6 +580,8 @@ def _aligned_rows(inside: list[Line], em: float, pg: PageData):
                 if abs(anchors[col] - sub.x0) > 2.5 or col in cells:
                     clean = False
                     continue
+                if col + 1 < len(anchors) and sub.x1 > anchors[col + 1] + 1.0:
+                    clean = False  # runs into the next column: the grid is not what it seems
                 cells[col] = sub
         if rows and (0 not in cells or (len(cells) == 1 and len(anchors) > 1)):
             wrapped = True  # a cell spilled onto a second line
@@ -569,6 +593,62 @@ def _aligned_rows(inside: list[Line], em: float, pg: PageData):
     if len(anchors) == 2 and last_col_chars and sum(last_col_chars) / len(last_col_chars) > 60:
         return None
     return rows, clean, wrapped
+
+
+def _count_anchors(edges: list[float]) -> int:
+    n = 0
+    run = 0
+    last = None
+    for x in edges:
+        if last is not None and x - last <= 2.5:
+            run += 1
+        else:
+            n += 1 if run >= 2 else 0
+            run = 1
+        last = x
+    return n + (1 if run >= 2 else 0)
+
+
+def _river_columns(inside: list[Line], em: float) -> list[tuple[float, float]]:
+    """Columns as the stretches of x that hold text, separated by bands of
+    white running the full height of the table. Works whatever the alignment
+    of the cells (left, centred, right)."""
+    spans = sorted(((s.x0, s.x1) for ln in inside for s in ln.spans if s.text.strip()), key=lambda t: t[0])
+    cols: list[list[float]] = []
+    for x0, x1 in spans:
+        if cols and x0 - cols[-1][1] < 0.7 * em:
+            cols[-1][1] = max(cols[-1][1], x1)
+        else:
+            cols.append([x0, x1])
+    return [(a, b) for a, b in cols]
+
+
+def _river_rows(inside: list[Line], cols: list[tuple[float, float]], pg: PageData):
+    from .inline import line_runs, tidy_runs
+
+    rows = []
+    wrapped = False
+    for ln in inside:
+        cells: dict[int, list] = {}
+        for s in ln.spans:
+            if not s.text.strip():
+                continue
+            cx = (s.x0 + s.x1) / 2
+            k = next((i for i, (a, b) in enumerate(cols) if a - 1 <= cx <= b + 1), None)
+            if k is None:
+                return None
+            cells.setdefault(k, []).append(s)
+        if rows and (0 not in cells or len(cells) == 1):
+            wrapped = True
+        row = []
+        for k in range(len(cols)):
+            if k in cells:
+                first, last = ln.spans.index(cells[k][0]), ln.spans.index(cells[k][-1])
+                row.append(tidy_runs(line_runs(Line(spans=ln.spans[first : last + 1], page=ln.page), pg.links)))
+            else:
+                row.append([])
+        rows.append(row)
+    return rows, True, wrapped
 
 
 def _grid_lines(r: pymupdf.Rect, drawings: list[dict]) -> tuple[list[float], list[float]]:
@@ -620,14 +700,22 @@ def _grid_rows(inside: list[Line], ys: list[float], xs: list[float], em: float, 
     n_rows, n_cols = len(ys) - 1, len(xs) - 1
     grid: list[list[list[Line]]] = [[[] for _ in range(n_cols)] for _ in range(n_rows)]
     for ln in inside:
-        for piece in _pieces(ln, em):
-            cx = (piece.x0 + piece.x1) / 2
-            cy = (piece.y0 + piece.y1) / 2
-            ri = next((i for i in range(n_rows) if ys[i] - 1 <= cy <= ys[i + 1] + 1), None)
+        cy = (ln.y0 + ln.y1) / 2
+        ri = next((i for i in range(n_rows) if ys[i] - 1 <= cy <= ys[i + 1] + 1), None)
+        if ri is None:
+            return None
+        # word by word: neighbouring cells can sit closer than a "wide gap"
+        runs_of: dict[int, list[int]] = {}
+        for si, sp in enumerate(ln.spans):
+            if not sp.text.strip():
+                continue
+            cx = (sp.x0 + sp.x1) / 2
             ci = next((i for i in range(n_cols) if xs[i] - 1 <= cx <= xs[i + 1] + 1), None)
-            if ri is None or ci is None:
+            if ci is None:
                 return None
-            grid[ri][ci].append(piece)
+            runs_of.setdefault(ci, []).append(si)
+        for ci, idx in runs_of.items():
+            grid[ri][ci].append(Line(spans=ln.spans[idx[0] : idx[-1] + 1], page=ln.page))
     from .inline import first_word_width
     from .model import Run
 
