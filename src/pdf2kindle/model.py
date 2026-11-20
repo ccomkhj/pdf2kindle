@@ -158,6 +158,7 @@ class Run:
     italic: bool = False
     mono: bool = False
     sup: bool = False
+    sub: bool = False
     href: str = ""  # external URL
     target: tuple[int, float] | None = None  # internal link (page, y)
     note: int = -1  # index into Book.notes when this run is a footnote ref
@@ -168,6 +169,7 @@ class Run:
             and self.italic == other.italic
             and self.mono == other.mono
             and self.sup == other.sup
+            and self.sub == other.sub
             and self.href == other.href
             and self.target == other.target
             and self.note == other.note

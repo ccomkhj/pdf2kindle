@@ -17,10 +17,13 @@ _WS = re.compile(r"[ \t\r\n]+")
 _PATHISH = re.compile(r"(?:\S*/\S+/|\w+://\S*/)$")
 
 
-def _style_of(span: Span, line_size: float) -> tuple[bool, bool, bool, bool]:
-    sup = span.superscript and span.size < 0.85 * line_size
+def _style_of(span: Span, line: Line) -> tuple[bool, bool, bool, bool, bool]:
+    small = span.size < 0.85 * line.size
+    shift = line.baseline - span.baseline  # positive: raised
+    sup = small and (span.superscript or shift > 0.2 * line.size)
+    sub = small and not sup and shift < -0.08 * line.size
     has_alpha = any(c.isalpha() for c in span.text)
-    return (span.bold and has_alpha, span.italic and has_alpha, span.mono, sup)
+    return (span.bold and has_alpha, span.italic and has_alpha, span.mono, sup, sub)
 
 
 def _links_for(line: Line, links: list[LinkRect]) -> list[LinkRect]:
@@ -52,9 +55,9 @@ def line_runs(line: Line, links: list[LinkRect], skip_chars: int = 0) -> list[Ru
                 continue
             start = to_skip
             to_skip = 0
-        bold, italic, mono, sup = _style_of(span, line.size)
+        bold, italic, mono, sup, sub = _style_of(span, line)
         if not hits:
-            _push(runs, Run(text[start:], bold, italic, mono, sup))
+            _push(runs, Run(text[start:], bold, italic, mono, sup, sub))
             continue
         # split the span wherever link coverage changes
         seg_start = start
@@ -62,7 +65,7 @@ def line_runs(line: Line, links: list[LinkRect], skip_chars: int = 0) -> list[Ru
         for i in range(start + 1, len(text) + 1):
             here = _link_at((span.xs[i] + span.xs[i + 1]) / 2, hits) if i < len(text) else None
             if i == len(text) or here is not current:
-                run = Run(text[seg_start:i], bold, italic, mono, sup)
+                run = Run(text[seg_start:i], bold, italic, mono, sup, sub)
                 if current is not None:
                     if current.uri:
                         if current.uri.lower().startswith(("http://", "https://", "mailto:", "ftp://")):
@@ -121,7 +124,7 @@ def join_lines(per_line: list[list[Run]]) -> list[Run]:
 
 
 def _styled(r: Run) -> bool:
-    return bool(r.bold or r.italic or r.mono or r.sup or r.href or r.target or r.note >= 0)
+    return bool(r.bold or r.italic or r.mono or r.sup or r.sub or r.href or r.target or r.note >= 0)
 
 
 def tidy_runs(runs: list[Run]) -> list[Run]:

@@ -116,6 +116,8 @@ class Writer:
                 text = f"<i>{text}</i>"
             if r.sup:
                 text = f"<sup>{text}</sup>"
+            if r.sub:
+                text = f"<sub>{text}</sub>"
             if r.href:
                 href = r.href
                 if href.startswith("#"):
@@ -235,7 +237,15 @@ class Writer:
         ext = "png" if b.media_type == "image/png" else "jpg"
         name = f"images/img{len(self.images) + 1:04d}.{ext}"
         self.images.append((name, b.data, b.media_type))
-        width = 100 if b.frac >= 0.7 else max(35, int(round(b.frac * 100 / 5) * 5) + 10)
+        if b.kind == "equation":
+            # a little larger than its share of the printed page, so that
+            # symbols stay near the size of the surrounding text
+            width = min(100, max(8, int(round(b.frac * 135))))
+            alt = esc(b.alt or "Equation")
+            return f'<p class="eq"{self._idattr(b)}><img src="../{name}" alt="{alt}" style="width: {width}%"/></p>'
+        # an e-reader screen is narrower than the printed page: give figures
+        # more of it than they had in print
+        width = 100 if b.frac >= 0.55 else max(40, int(round(b.frac * 170 / 5) * 5))
         alt = esc(b.alt or runs_text(b.caption) or "Figure")
         cap = ""
         if b.caption:

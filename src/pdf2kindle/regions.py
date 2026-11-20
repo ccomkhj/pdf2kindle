@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass, field
 
 import pymupdf
@@ -168,6 +169,7 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
                 found.bullets.append(pymupdf.Rect(r))
 
     figure_rects = _merge_rects(figure_rects, 6.0)
+    equation_rects = _equations(lines, st, left, right, table_rects + figure_rects, drawings) if opts.equations else []
     for r in figure_rects:
         # labels that poke out of the drawing still belong to it
         grown = pymupdf.Rect(r)
@@ -182,7 +184,111 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
         fig = render(doc, pg, pad, opts, text_width)
         found.blocks.append(fig)
         found.rects.append(("figure", grown))
+    for r in equation_rects:
+        inside = [ln for ln in lines if not ln.role and _center_in(ln, r, pad=0.5)]
+        if not inside:
+            continue
+        for ln in inside:
+            ln.role = "equation"
+        pad = pymupdf.Rect(r.x0 - 3, r.y0 - 3, r.x1 + 3, r.y1 + 3)
+        fig = render(doc, pg, pad, opts, text_width)
+        fig.kind = "equation"
+        fig.alt = " ".join(" ".join(ln.text.split()) for ln in sorted(inside, key=lambda l: (l.baseline, l.x0)))[:300]
+        found.blocks.append(fig)
+        found.rects.append(("equation", r))
     return found
+
+
+_MATH_FONT = re.compile(
+    r"^(cmmi|cmsy|cmex|cmbsy|cmmib|msam|msbm|eufm|eusm|eurm|rsfs|lasy|wasy|stmary|esint|mnsymbol|"
+    r"txsy|txmi|txex|pxsy|pxmi|pxex|ntxmi|ntxsy|ntxex|newtxmi|mtmi|mtsy|mtex|rpxmi|rtxmi|bbm|dsrom|fourier-m)"
+    r"|math|symbol|mt ?extra|euclid",
+    re.I,
+)
+_OPERATORS = set("=+\u2212\u00d7\u00b7\u2264\u2265\u2248\u2260\u2211\u220f\u222b\u221a\u221e\u2208\u2202\u2207\u2192\u2190\u21d2\u2261\u221d\u00b1<>|^")
+_EQ_NUMBER = re.compile(r"\(\s*[A-Z]?\d+(\.\d+)*[a-z]?\s*\)\s*$")
+
+
+def _math_weight(ln: Line) -> tuple[int, int, int]:
+    """(characters in mathematical fonts, operator characters, all characters)"""
+    math = ops = total = 0
+    for s in ln.spans:
+        n = sum(1 for c in s.text if not c.isspace())
+        total += n
+        if _MATH_FONT.search(s.font):
+            math += n
+        else:
+            ops += sum(1 for c in s.text if c in _OPERATORS)
+    return math, ops, total
+
+
+def _core_extent(ln: Line, em: float) -> tuple[float, float]:
+    """x extent of a line without a trailing equation number at the margin."""
+    pieces = _pieces(ln, em)
+    if len(pieces) >= 2 and _EQ_NUMBER.search("(" + pieces[-1].text.strip().strip("()") + ")") and len(pieces[-1].text.strip()) <= 10:
+        pieces = pieces[:-1]
+    return pieces[0].x0, pieces[-1].x1
+
+
+def _equations(lines: list[Line], st: DocStats, left: float, right: float, taken: list, drawings: list[dict]) -> list:
+    """Displayed equations: set-off lines dominated by mathematical type,
+    together with the small fragments that belong to them (limits, the parts
+    of a fraction). They are kept as pictures; reflowed, they are unreadable.
+    """
+    em = st.body_size
+    free = [ln for ln in lines if not ln.role and not any(_center_in(ln, t) for t in taken)]
+    seeds: list[pymupdf.Rect] = []
+    for ln in free:
+        math, ops, total = _math_weight(ln)
+        if math < 2 or total == 0 or (math + ops) / total < 0.25 or ln.mono_ratio > 0.3:
+            continue
+        x0, x1 = _core_extent(ln, em)
+        if x0 < left + 1.5 * em or x1 > right - 1.0 * em:
+            continue  # starts at the margin or runs to it: running text with inline maths
+        seeds.append(pymupdf.Rect(ln.x0, ln.y0, ln.x1, ln.y1))
+    if not seeds:
+        return []
+    seeds.sort(key=lambda r: r.y0)
+    regions: list[pymupdf.Rect] = []
+    for r in seeds:
+        if regions and r.y0 - regions[-1].y1 < 0.9 * st.pitch and not _body_between(free, regions[-1], r, left, em):
+            regions[-1] |= r
+        else:
+            regions.append(pymupdf.Rect(r))
+    # pull in satellites: limits under a sum, numerators, stacked conditions
+    for _ in range(3):
+        changed = False
+        for reg in regions:
+            for ln in free:
+                box = pymupdf.Rect(ln.x0, ln.y0, ln.x1, ln.y1)
+                if reg.contains(box):
+                    continue
+                cy = (ln.y0 + ln.y1) / 2
+                # limits of a sum or integral sit well clear of the main line
+                reach = 1.9 * em if (ln.x1 - ln.x0) < 3 * em and ln.size < st.body_size - 0.5 else 0.9 * em
+                if not (reg.y0 - reach <= cy <= reg.y1 + reach):
+                    continue
+                if ln.x1 < reg.x0 - 2 * em or ln.x0 > reg.x1 + 2 * em:
+                    continue
+                at_margin = ln.x0 < left + 0.5 * em
+                small = ln.size < st.body_size - 0.5 or (ln.x1 - ln.x0) < 6 * em
+                inside_band = reg.y0 - 1 <= cy <= reg.y1 + 1
+                if inside_band or (small and not at_margin):
+                    reg.include_rect(box)
+                    changed = True
+        if not changed:
+            break
+    regions = _merge_rects(regions, 1.0)
+    for reg in regions:  # fraction bars, radicals
+        for d in drawings:
+            dr = d["rect"]
+            if dr.height < 3 and dr.width < 0.9 * (right - left) and reg.y0 - 2 <= dr.y0 <= reg.y1 + 2 and dr.x0 >= reg.x0 - 3 and dr.x1 <= reg.x1 + 3:
+                reg.include_rect(dr)
+    return regions
+
+
+def _body_between(lines: list[Line], a, b, left: float, em: float) -> bool:
+    return any(a.y1 <= (ln.y0 + ln.y1) / 2 <= b.y0 and ln.x0 < left + 0.5 * em and ln.x1 - ln.x0 > 8 * em for ln in lines)
 
 
 def _is_box(c: pymupdf.Rect, members: list[dict]) -> bool:
@@ -222,7 +328,7 @@ def _merge_rects(rects: list[pymupdf.Rect], tol: float) -> list[pymupdf.Rect]:
             for o in out:
                 grown = pymupdf.Rect(o.x0 - tol, o.y0 - tol, o.x1 + tol, o.y1 + tol)
                 if not (grown & r).is_empty:
-                    o |= r
+                    o.include_rect(r)
                     changed = True
                     break
             else:

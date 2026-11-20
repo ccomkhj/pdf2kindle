@@ -67,3 +67,13 @@ def test_furniture_spares_footnotes_and_body():
     mark_furniture(pages)
     for pg in pages:
         assert [ln.role for ln in pg.lines] == ["furniture", "", "", ""]
+
+
+def test_merge_rects_keeps_and_joins():
+    import pymupdf
+
+    from pdf2kindle.regions import _merge_rects
+
+    a, b, c = pymupdf.Rect(0, 0, 10, 10), pymupdf.Rect(12, 0, 20, 10), pymupdf.Rect(100, 100, 110, 110)
+    merged = _merge_rects([a, b, c], 3.0)
+    assert [tuple(r) for r in merged] == [(0, 0, 20, 10), (100, 100, 110, 110)]

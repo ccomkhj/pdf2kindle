@@ -50,6 +50,9 @@ class Options:
     # continuation; "plain" emits one ordinary <pre> per listing
     code_wrap: str = "hanging"
 
+    # displayed equations are kept as images (reflowed, they are unreadable)
+    equations: bool = True
+
     # footnotes
     footnotes: bool = True
 
