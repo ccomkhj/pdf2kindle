@@ -10,6 +10,7 @@ import pymupdf
 from PIL import Image
 
 from .config import Options
+from .judge import caption_label, is_code, is_display_size
 from .model import Block, Figure, Line, PageData, Table
 from .stats import DocStats
 
@@ -77,10 +78,6 @@ def _center_in(ln: Line, r: pymupdf.Rect, pad: float = 1.0) -> bool:
     return r.x0 - pad <= cx <= r.x1 + pad and r.y0 - pad <= cy <= r.y1 + pad
 
 
-def _is_code(ln: Line) -> bool:
-    return ln.mono_ratio >= 0.5
-
-
 def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: DocStats, opts: Options) -> Found:
     """Locate figures, tables and drawn boxes; mark the lines they swallow."""
     page = doc[pg.index]
@@ -139,12 +136,12 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
 
     def stops(ln: Line) -> bool:
         """Lines a figure cannot extend above: text, code, headings, captions."""
-        if anchored(ln) or ln.mono_ratio >= 0.8 or _ANY_CAPTION.match(ln.text):
+        if anchored(ln) or is_code(ln) or caption_label(ln.text):
             return True
-        return ln.size >= st.body_size + 1.2 and ln.bold_ratio > 0.5
+        return is_display_size(ln.size, st.body_size) and ln.bold_ratio > 0.5
 
     for cap in lines:
-        if cap.role or not _FIG_CAPTION.match(cap.text):
+        if cap.role or caption_label(cap.text) != "figure":
             continue
         above = [ln for ln in lines if not ln.role and ln.y1 <= cap.y0 + 1 and ln is not cap]
         floor = max((ln.y1 for ln in above if stops(ln)), default=content_top - 1)
@@ -208,7 +205,7 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
         covered = sum((pymupdf.Rect(ln.x0, ln.y0, ln.x1, ln.y1) & c).get_area() for ln in inside)
         if c.width < 0.5 * text_width and covered > 0.4 * c.get_area():
             continue  # a keycap, badge or similar frame drawn around words
-        if inside and sum(1 for ln in inside if _is_code(ln)) >= 0.7 * len(inside) and covered > 0.15 * c.get_area():
+        if inside and sum(1 for ln in inside if is_code(ln)) >= 0.7 * len(inside) and covered > 0.15 * c.get_area():
             continue  # decoration around a code listing: keep the code as text
         long_lines = sum(1 for ln in inside if ln.x1 - ln.x0 > 0.7 * c.width)
         if long_lines >= 5 and c.width > 0.6 * text_width:
@@ -262,8 +259,6 @@ _MATH_FONT = re.compile(
     r"|math|symbol|mt ?extra|euclid",
     re.I,
 )
-_FIG_CAPTION = re.compile(r"^\s*(Figure|Fig\.)\s*[\dA-Z][\d.\-]*\s*[:.\u2013\u2014|-]\s", re.I)
-_ANY_CAPTION = re.compile(r"^\s*(Figure|Fig\.|Table|Listing|Algorithm|Example)\s*[\dA-Z][\d.\-]*\s*[:.\u2013\u2014|-]", re.I)
 _OPERATORS = set("=+\u2212\u00d7\u00b7\u2264\u2265\u2248\u2260\u2211\u220f\u222b\u221a\u221e\u2208\u2202\u2207\u2192\u2190\u21d2\u2261\u221d\u00b1<>|^")
 _EQ_NUMBER = re.compile(r"[(\[]\s*[A-Z]?\d+(\.\d+)*[a-z]?\s*[)\]]\s*$")
 
@@ -458,7 +453,7 @@ def _table(doc, pg: PageData, r: pymupdf.Rect, inside: list[Line], drawings, st:
     """
     if len(inside) < 2:
         return None
-    if sum(1 for ln in inside if _is_code(ln)) > 0.4 * len(inside):
+    if sum(1 for ln in inside if is_code(ln)) > 0.4 * len(inside):
         return None  # aligned code or sample output
     inside = sorted(inside, key=lambda ln: (ln.baseline, ln.x0))
     em = st.body_size

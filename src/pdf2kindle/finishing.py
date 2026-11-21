@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 
 from .config import Options
 from .inline import KSOFT, SOFT, join_lines, runs_text
+from .judge import caption_label, is_display_size
 from .model import Block, Book, Code, Figure, Heading, ListItem, Note, Paragraph, Run, Table
 
 _INDEX_TITLE = re.compile(
@@ -34,7 +35,6 @@ _INDEX_TITLE = re.compile(
     r"index of [\w ]+)$|^색인$|^찾아보기$",
     re.I,
 )
-_LOOSE_CAPTION = re.compile(r"^(Figure|Fig\.|Table|Listing|그림|표)\s*\d", re.I)
 _SECTION_NUMBER = re.compile(r"^\s*((?:\d+|[A-Z])(?:\.\d+)*)\.?\s+\S")
 _WORD = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)*", re.UNICODE)
 
@@ -103,7 +103,7 @@ def _settle_headings(blocks: list[Block], draft: Draft) -> None:
         for b in subheads:
             counts[b.style] += 1
             first_page.setdefault(b.style, b.page)
-        ranked = sorted((sig for sig in counts if sig[1] >= body + 1.2), key=lambda sig: -sig[1])
+        ranked = sorted((sig for sig in counts if is_display_size(sig[1], body)), key=lambda sig: -sig[1])
         # one-off display type at the very start is the title page, not a chapter
         last_page: dict[tuple[str, float], int] = {}
         for b in subheads:
@@ -188,7 +188,7 @@ def _is_caption(p: Paragraph) -> bool:
         return True
     # directly under a figure, "Figure 3 Title" without punctuation still counts
     text = runs_text(p.runs)
-    return p.kind == "p" and len(text) < 160 and bool(_LOOSE_CAPTION.match(text)) and not text.rstrip().endswith(".")
+    return p.kind == "p" and len(text) < 160 and caption_label(text, loose=True) is not None and not text.rstrip().endswith(".")
 
 
 def _attach_captions(blocks: list[Block]) -> list[Block]:

@@ -12,12 +12,12 @@ import re
 from dataclasses import dataclass, field
 
 from .inline import SOFT, code_lines, first_word_width, join_lines, line_runs, runs_text, tidy_runs
+from .judge import caption_label, is_code, is_heading_like
 from .model import Block, Code, Heading, Line, ListItem, Note, PageData, Paragraph
 from .stats import DocStats
 from .textutil import ends_sentence, match_bullet, match_enum, norm_key
 
 STRONG_BULLETS = "•◦▪▫‣⁃∙●○■□▶►"
-_CAPTION = re.compile(r"^(Figure|Fig\.|Table|Listing|Example|Exhibit|그림|표)\s*[\dA-Z][\d.\-]*\s*[:.\u2013\u2014|-]\s", re.I)
 # "12 Text", "12. Text", "* Text" - but not "2.1 Text" (a numbered exercise or heading)
 _NOTE_LABEL = re.compile(r"^\s*(\d{1,3}|[*†‡§¶]+)(?:[.)](?=\s)|(?=\s)|(?=[^\W\d]))\s*")
 
@@ -42,26 +42,6 @@ class Context:
 
 
 # --------------------------------------------------------------------------
-# line predicates
-# --------------------------------------------------------------------------
-def is_code_line(ln: Line) -> bool:
-    if ln.mono_ratio >= 0.95:
-        return True
-    if ln.mono_ratio >= 0.5:
-        # the non-monospace remainder may only be symbols (prompts, arrows)
-        return not any((not s.mono) and any(c.isalpha() for c in s.text) for s in ln.spans)
-    return False
-
-
-def heading_like(ln: Line, st: DocStats) -> bool:
-    if ln.mono_ratio > 0.5:
-        return False
-    if ln.size >= st.body_size + 1.2:
-        return True
-    return ln.bold_ratio >= 0.85 and ln.size >= st.body_size - 0.25 and len(ln.text) <= 90
-
-
-# --------------------------------------------------------------------------
 # footnotes
 # --------------------------------------------------------------------------
 def peel_footnotes(ctx: Context, pg: PageData, lines: list[Line]) -> tuple[list[Line], list[Note]]:
@@ -75,7 +55,7 @@ def peel_footnotes(ctx: Context, pg: PageData, lines: list[Line]) -> tuple[list[
         return lines, []
     limit = st.body_size - 0.7
     k = len(lines)
-    while k > 0 and lines[k - 1].size <= limit and not is_code_line(lines[k - 1]):
+    while k > 0 and lines[k - 1].size <= limit and not is_code(lines[k - 1]):
         k -= 1
     # code inside a footnote: allow mono lines once we are inside the small-print zone
     tail = lines[k:]
@@ -159,7 +139,7 @@ def pin_outline(ctx: Context, pg: PageData, lines: list[Line]) -> dict[int, tupl
                 score = _title_score(want, joined)
                 if score <= 0:
                     continue
-                styled = heading_like(ln, st) or (ln.bold_ratio >= 0.25 and len(ln.text) < 90)
+                styled = is_heading_like(ln, st) or (ln.bold_ratio >= 0.25 and len(ln.text) < 90)
                 if not styled and score < 1.0:
                     continue
                 score += 0.5 if styled else 0.0
@@ -172,7 +152,7 @@ def pin_outline(ctx: Context, pg: PageData, lines: list[Line]) -> dict[int, tupl
             # text did not match (odd encoding, letter-spacing): take the
             # heading-styled line sitting at the destination, if there is one
             for i, ln in enumerate(lines):
-                if i in taken or not heading_like(ln, st):
+                if i in taken or not is_heading_like(ln, st):
                     continue
                 if -6 <= ln.y0 - entry.y <= 90:
                     j = i + 1
@@ -278,7 +258,7 @@ class PageFlow:
 
         prev = None
         for ln in self.lines:
-            if is_code_line(ln):
+            if is_code(ln):
                 close()
                 prev = None
                 continue
@@ -356,7 +336,7 @@ class PageFlow:
                 self._emit_heading(lines[i:end], entry)
                 i = end
                 continue
-            if is_code_line(ln):
+            if is_code(ln):
                 if para and self._continues(para, ln, strict=True):
                     para.append(ln)
                     i += 1
@@ -364,7 +344,7 @@ class PageFlow:
                 nxt = lines[i + 1] if i + 1 < n and (i + 1) not in pinned else None
                 starts_para = (
                     nxt is not None
-                    and not is_code_line(nxt)
+                    and not is_code(nxt)
                     and ln.x1 >= self.right - 2.5 * ln.size
                     and self._continues([ln], nxt, strict=True)
                 )
@@ -372,7 +352,7 @@ class PageFlow:
                     self._flush(para)
                     para = []
                     j = i + 1
-                    while j < n and j not in pinned and is_code_line(lines[j]):
+                    while j < n and j not in pinned and is_code(lines[j]):
                         gap = lines[j].baseline - lines[j - 1].baseline
                         if gap > 3.2 * st.pitch_for(ln.size) or gap <= 0 or abs(lines[j].size - ln.size) > 1.6:
                             break
@@ -424,14 +404,7 @@ class PageFlow:
             return
         # a lone short monospace line directly above indented prose is a
         # definition term, not a listing
-        if (
-            len(group) == 1
-            and after is not None
-            and not is_code_line(after)
-            and after.x0 >= first.x0 + 1.5 * st.body_size
-            and 0 < after.baseline - first.baseline <= 1.3 * st.pitch
-            and first.x1 - first.x0 < 0.7 * (self.right - self.left)
-        ):
+        if len(group) == 1 and after is not None and not is_code(after) and self._heads_indented_text(first, after):
             self._emit_term(first)
             return
         for ln in group:
@@ -444,6 +417,16 @@ class PageFlow:
                 lines=code_lines(group, st.pitch_for(first.size)),
                 size=first.size,
             )
+        )
+
+    def _heads_indented_text(self, first: Line, after: Line) -> bool:
+        """A short line with the next line set well in from it and directly
+        below: the shape of a definition term above its description."""
+        st = self.st
+        return (
+            after.x0 >= first.x0 + 1.5 * st.body_size
+            and 0 < after.baseline - first.baseline <= 1.3 * st.pitch
+            and first.x1 - first.x0 < 0.7 * (self.right - self.left)
         )
 
     def _emit_term(self, line: Line) -> None:
@@ -482,11 +465,9 @@ class PageFlow:
         if (
             len(para) == 1
             and after is not None
-            and after.x0 >= first.x0 + 1.5 * em
-            and 0 < after.baseline - first.baseline <= 1.3 * st.pitch
-            and first.x1 - first.x0 < 0.7 * (self.right - self.left)
+            and self._heads_indented_text(first, after)
             and not self._starts_item(first)
-            and not heading_like(first, st)
+            and not is_heading_like(first, st)
             and not ends_sentence(text0)
         ):
             self._emit_term(first)
@@ -510,7 +491,7 @@ class PageFlow:
             bullet = None  # a dash opening an ordinary paragraph
         if enum and len(para) >= 2 and not hanging:
             enum = None
-        if enum and heading_like(first, st):
+        if enum and is_heading_like(first, st):
             enum = None
         m = bullet or enum
         drawn = self.drawn.get(id(first))
@@ -541,9 +522,9 @@ class PageFlow:
         last = para[-1]
         kind = "p"
         text = runs_text(runs)
-        if all(heading_like(ln, st) for ln in para) and len(para) <= 3 and len(text) <= 200:
+        if all(is_heading_like(ln, st) for ln in para) and len(para) <= 3 and len(text) <= 200:
             kind = "subhead"
-        elif _CAPTION.match(text) and len(text) < 400:
+        elif caption_label(text) and len(text) < 400:
             kind = "caption"
         elif (
             len(para) == 1
