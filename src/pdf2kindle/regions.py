@@ -10,7 +10,7 @@ import pymupdf
 from PIL import Image
 
 from .config import Options
-from .judge import caption_label, is_code, is_display_size
+from .judge import caption_label, is_code, is_display_size, is_mostly_fixed_pitch
 from .model import Block, Figure, Line, PageData, Table
 from .stats import DocStats
 
@@ -120,7 +120,9 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
         """A line of running text: body size, starting at the text margin."""
         if abs(ln.size - st.body_size) > 0.8 or ln.mono_ratio > 0.5:
             return False
-        at_margin = abs(ln.x0 - left) <= 2 or (st.parindent and abs(ln.x0 - left - st.parindent) <= 2)
+        # at the margin or outside it: on a page that is mostly an indented
+        # list the measured margin is the list's, and body text starts left of it
+        at_margin = ln.x0 <= left + 2 or (st.parindent and abs(ln.x0 - left - st.parindent) <= 2)
         return bool(at_margin) and sum(1 for c in ln.text if c.isalpha()) >= 3
 
     try:
@@ -138,15 +140,7 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
         """Lines a figure cannot extend above: text, code, headings, captions."""
         if anchored(ln) or is_code(ln) or caption_label(ln.text):
             return True
-        if is_display_size(ln.size, st.body_size) and ln.bold_ratio > 0.5:
-            return True
-        # a long line of body type is prose wherever it starts (the margin
-        # measured for a page with little text can be off)
-        return (
-            abs(ln.size - st.body_size) <= 0.8
-            and ln.x1 - ln.x0 >= 0.75 * text_width
-            and sum(1 for c in ln.text if c.isalpha()) >= 40
-        )
+        return is_display_size(ln.size, st.body_size) and ln.bold_ratio > 0.5
 
     for cap in lines:
         if cap.role or caption_label(cap.text) != "figure":
@@ -213,8 +207,8 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
         covered = sum((pymupdf.Rect(ln.x0, ln.y0, ln.x1, ln.y1) & c).get_area() for ln in inside)
         if c.width < 0.5 * text_width and covered > 0.4 * c.get_area():
             continue  # a keycap, badge or similar frame drawn around words
-        if inside and sum(1 for ln in inside if is_code(ln)) >= 0.7 * len(inside) and covered > 0.15 * c.get_area():
-            continue  # decoration around a code listing: keep the code as text
+        if inside and sum(1 for ln in inside if is_mostly_fixed_pitch(ln)) >= 0.7 * len(inside) and covered > 0.15 * c.get_area():
+            continue  # decoration around a listing (code or console output): keep it as text
         long_lines = sum(1 for ln in inside if ln.x1 - ln.x0 > 0.7 * c.width)
         if long_lines >= 5 and c.width > 0.6 * text_width:
             # running text inside a decorated frame: keep the text as text

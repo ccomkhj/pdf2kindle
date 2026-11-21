@@ -65,6 +65,17 @@ def test_is_code_with_cjk_text():
     assert not is_code(line(("(1) ", 0), ("日文 章魚 怎麼 說?", F_MONO)))
 
 
+def test_mostly_fixed_pitch_is_the_weaker_question():
+    from pdf2kindle.judge import is_mostly_fixed_pitch
+
+    # console output with a Korean message: not provably code on its own,
+    # but enough to call the panel around it a listing
+    output = line(("error C2065: 'a' : ", F_MONO), ("선언되지 않음", 0))
+    assert is_mostly_fixed_pitch(output) and not is_code(output)
+    assert not is_mostly_fixed_pitch(line(("Run ", 0), ("ls", F_MONO), (" and read the long output", 0)))
+    assert not is_mostly_fixed_pitch(line(("日文 章魚 怎麼 說?", F_MONO)))
+
+
 def test_which_openers_make_a_caption_paragraph():
     from pdf2kindle.judge import is_caption_paragraph
 

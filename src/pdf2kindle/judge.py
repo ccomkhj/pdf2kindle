@@ -42,25 +42,40 @@ def _cjk(c: str) -> bool:
     return "\u2e80" <= c <= "\u9fff" or "\uac00" <= c <= "\ud7a3" or "\uf900" <= c <= "\ufaff" or "\uff00" <= c <= "\uffef"
 
 
-def is_code(ln: Line) -> bool:
-    """Is this a line of a listing (as opposed to prose with code in it)?
-
-    Evidence for code is fixed-pitch *Latin* type: CJK fonts are fixed-pitch
-    by nature and say nothing. What is not fixed-pitch may only be symbols
-    (prompts, arrows) or CJK text where code allows prose: after a comment
-    opener or inside a string literal, where the code font had no glyphs
-    for it and the producer fell back to the text font.
-    """
-    code = other = 0
+def _fixed_pitch_share(ln: Line) -> tuple[int, int]:
+    """(characters of fixed-pitch Latin type, all characters). CJK glyphs do
+    not count as evidence: their fonts are fixed-pitch by nature."""
+    code = total = 0
     for s in ln.spans:
         for c in s.text:
             if c.isspace():
                 continue
+            total += 1
             if s.mono and not _cjk(c):
                 code += 1
-            else:
-                other += 1
-    total = code + other
+    return code, total
+
+
+def is_mostly_fixed_pitch(ln: Line) -> bool:
+    """Is at least half of this line set in fixed-pitch type?
+
+    A weaker statement than ``is_code``: enough to call a framed panel a
+    listing when most of its lines pass, not enough to pull a line out of
+    running text (prose with a long inline snippet passes too).
+    """
+    code, total = _fixed_pitch_share(ln)
+    return total > 0 and code >= 0.5 * total
+
+
+def is_code(ln: Line) -> bool:
+    """Is this a line of a listing (as opposed to prose with code in it)?
+
+    What is not fixed-pitch may only be symbols (prompts, arrows) or CJK
+    text where code allows prose: after a comment opener or inside a string
+    literal, where the code font had no glyphs for it and the producer fell
+    back to the text font.
+    """
+    code, total = _fixed_pitch_share(ln)
     if total == 0 or code < 0.5 * total:
         return False
     if code >= 0.95 * total:
