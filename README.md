@@ -56,7 +56,7 @@ pdf2kindle book.pdf --pages 12-340 --profile book.toml
 'GAWK: Effective AWK Programming' -> gawk.epub
   pages                599
   chapters             27
-  blocks               {'Code': 1064, 'Figure': 19, 'Heading': 467, 'ListItem': 757, 'Paragraph': 5160, 'Table': 11}
+  blocks               {'Code': 1064, 'Figure': 19, 'Heading': 467, 'ListItem': 757, 'Paragraph': 5135, 'Table': 15}
   footnotes            122
   footnotes_linked     121
   internal_links       1914
