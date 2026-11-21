@@ -4,8 +4,10 @@ Two layers live here:
 
 * *raw* geometry straight from the PDF (``Span`` -> ``Line`` -> ``PageData``)
 * the *book* model (``Block`` subclasses with ``Run`` inline content), which is
-  what the EPUB writer consumes and carries no page geometry that matters for
-  rendering.
+  what the EPUB writer consumes. Blocks also carry a few facts about how they
+  sat on the page (``page``, ``y``, ``open_end``, ``last_x1`` ...): hand-over
+  hints for the finishing passes, which rejoin text across page breaks. A
+  writer ignores them.
 """
 
 from __future__ import annotations
@@ -203,7 +205,10 @@ class Heading(Block):
 class Paragraph(Block):
     runs: list[Run] = field(default_factory=list)
     indent: int = 0  # left indent level relative to the body margin
-    kind: str = "p"  # p | subhead | caption | center
+    kind: str = "p"  # p | subhead | caption | center | term | label | aside | note
+    # display type (font, size) of a heading candidate; read and cleared by
+    # the finishing passes when they decide whether it is a real heading
+    style: tuple[str, float] | None = None
     first_indented: bool = False  # the PDF indented its first line
     open_end: bool = False  # last line ran to the margin (may continue)
     last_x1: float = 0.0

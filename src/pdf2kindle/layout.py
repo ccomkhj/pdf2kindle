@@ -578,10 +578,9 @@ class PageFlow:
         )
         if kind == "subhead":
             main = max(para, key=lambda l: l.size)
-            block.first_word_w = main.size  # reused as the style size for ranking
-            self.ctx.heading_styles.setdefault((main.font, main.size), {}).setdefault(0, 0)
-            self.ctx.heading_styles[(main.font, main.size)][0] += 1
-            block.anchor = f"{main.font}|{main.size}"  # temporary: style signature
+            block.style = (main.font, main.size)
+            self.ctx.heading_styles.setdefault(block.style, {}).setdefault(0, 0)
+            self.ctx.heading_styles[block.style][0] += 1
         self.blocks.append(block)
 
     def _open_end(self, para: list[Line]) -> bool:
