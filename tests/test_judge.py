@@ -33,7 +33,8 @@ def line(*parts: tuple[str, int], size: float = 10.0) -> Line:
         ("표 2-1. 자료형", "table", "table"),
         ("Table A-3 | Results", "table", "table"),
         ("Listing 7: hello.c", "listing", "listing"),
-        ("Algorithm 1: K-means", "other", "other"),
+        ("Algorithm 1: K-means", "algorithm", "algorithm"),
+        ("Example 2.3: Matrices", "example", "example"),
         ("Figure 2.1 shows where tokens sit.", None, "figure"),  # a sentence, unless it sits under a float
         ("그림 3 메모리", None, "figure"),
         ("Example 3 is instructive", None, None),  # loose never answers for the catch-all words
@@ -51,6 +52,26 @@ def test_is_code_wants_a_listing_not_prose_with_code_in_it():
     assert is_code(line(("$ ", 0), ("make install", F_MONO)))  # a symbol prompt in another font
     assert not is_code(line(("TEXTDOMAIN", F_MONO), (" is set.", 0)))
     assert not is_code(line(("Run ", 0), ("make", F_MONO), (" first", 0)))
+
+
+def test_is_code_with_cjk_text():
+    # comments and string literals fall back to the text font for Hangul
+    assert is_code(line(("char ch; // ", F_MONO), ("문자", 0)))
+    assert is_code(line(('printf("', F_MONO), ("변수 입력", 0), (' : ");', F_MONO)))
+    assert is_code(line(("x = 1  # ", F_MONO), ("값", 0)))
+    # ... but prose with a lot of inline code is still prose
+    assert not is_code(line(('printf("%d", a)', F_MONO), (" 를 봅시다", 0)))
+    # a fixed-pitch CJK font is no evidence of code
+    assert not is_code(line(("(1) ", 0), ("日文 章魚 怎麼 說?", F_MONO)))
+
+
+def test_which_openers_make_a_caption_paragraph():
+    from pdf2kindle.judge import is_caption_paragraph
+
+    assert is_caption_paragraph("Figure 2.1: The pipeline")
+    assert is_caption_paragraph("Example 2.3: Matrices")
+    assert not is_caption_paragraph("Algorithm 1: Go through all pairs of cells")
+    assert not is_caption_paragraph("Figure 2.1 shows where tokens sit.")
 
 
 def test_heading_likeness():

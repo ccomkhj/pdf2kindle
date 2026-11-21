@@ -138,7 +138,15 @@ def find_regions(doc: pymupdf.Document, pg: PageData, lines: list[Line], st: Doc
         """Lines a figure cannot extend above: text, code, headings, captions."""
         if anchored(ln) or is_code(ln) or caption_label(ln.text):
             return True
-        return is_display_size(ln.size, st.body_size) and ln.bold_ratio > 0.5
+        if is_display_size(ln.size, st.body_size) and ln.bold_ratio > 0.5:
+            return True
+        # a long line of body type is prose wherever it starts (the margin
+        # measured for a page with little text can be off)
+        return (
+            abs(ln.size - st.body_size) <= 0.8
+            and ln.x1 - ln.x0 >= 0.75 * text_width
+            and sum(1 for c in ln.text if c.isalpha()) >= 40
+        )
 
     for cap in lines:
         if cap.role or caption_label(cap.text) != "figure":

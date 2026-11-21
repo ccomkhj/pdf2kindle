@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 
 from .inline import SOFT, code_lines, first_word_width, join_lines, line_runs, runs_text, tidy_runs
-from .judge import caption_label, is_code, is_heading_like
+from .judge import is_caption_paragraph, is_code, is_heading_like
 from .model import Block, Code, Heading, Line, ListItem, Note, PageData, Paragraph
 from .stats import DocStats
 from .textutil import ends_sentence, match_bullet, match_enum, norm_key
@@ -524,7 +524,7 @@ class PageFlow:
         text = runs_text(runs)
         if all(is_heading_like(ln, st) for ln in para) and len(para) <= 3 and len(text) <= 200:
             kind = "subhead"
-        elif caption_label(text) and len(text) < 400:
+        elif is_caption_paragraph(text) and len(text) < 400:
             kind = "caption"
         elif (
             len(para) == 1
