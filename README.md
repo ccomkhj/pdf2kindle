@@ -4,19 +4,43 @@
 
 Convert a single-column PDF with selectable text into a reflowable EPUB 3. Paragraphs wrap to the Kindle screen and respond to the reader’s font settings. Conversion runs locally.
 
-Try *Tiny Parsers*, a short book included with the project. These renders show the same chapter in the PDF and the converted EPUB. [Original PDF](tests/fixtures/sample-outline.pdf) · [Download EPUB](docs/demo/tiny-parsers.epub?raw=1) · [Watch the font-size demo](docs/demo/reflow.gif) · [Upload to Kindle](https://www.amazon.com/sendtokindle)
+## Quick start with Claude Code or Codex
+
+Open Claude Code or Codex on your computer and paste this prompt. Replace the sample URL with your own PDF link or the path to a PDF on your computer. If your app supports file attachments, you can attach the PDF and refer to it in the prompt.
+
+```text
+Use https://github.com/ccomkhj/pdf2kindle to convert this PDF into a Kindle-ready EPUB.
+https://supermindai.github.io/AI-Agent-Book/Engineering-AI-Agents.pdf
+
+Set up the converter locally, run it, and give me the saved EPUB and the
+Amazon Send to Kindle upload link.
+```
+
+Upload the resulting EPUB while signed in to the Amazon account you use on your Kindle. Then sync your Kindle and look for the book in your library. [Send to Kindle](https://www.amazon.com/sendtokindle)
+
+## Send by email on a Mac
+
+1. Copy your device’s address from Amazon’s **Manage Your Content and Devices → Preferences → Personal Document Settings → Send to Kindle Email Settings**. [Find your Kindle address](https://digprjsurvey.amazon.com/csad/help/node/G7V489F2ZZU9JJGE)
+2. Sign in to your sending account in Apple Mail. Add the address Mail uses in the **From** field to Amazon’s **Approved Personal Document Email List**. If macOS asks, allow Claude Code, Codex, or the terminal running it to control Mail. [Approve your sender](https://digprjsurvey.amazon.com/csad/help/node/GX9XLEVV8G4DB28H) · [Allow Mail automation](https://support.apple.com/en-au/guide/mac-help/mchl07817563/mac)
+3. Paste this follow-up into the same conversation with your actual Kindle address.
+
+   ```text
+   Send the EPUB you just created to YOUR_ADDRESS@kindle.com using pdf2kindle
+   and Apple Mail. Check Outbox and Sent before retrying. Tell me if I need
+   to approve a verification email from Amazon.
+   ```
+
+4. If Amazon sends **“Verify your Send to Kindle document request”**, open it and click **Verify Request** within 48 hours. Then sync your Kindle. This was the final step when sending the *Engineering AI Agents* sample. [Amazon’s verification instructions](https://digprjsurvey.amazon.com/csad/help/node/G98WYFZBRHWGZACA)
+
+If the message stays in **Outbox**, open **Mail → Window → Connection Doctor**. If the outgoing server (SMTP) reports a login failure, sign in again under **System Settings → Internet Accounts**. Mail may send queued messages after reconnecting, so check **Sent** before retrying. If the message is in **Sent** and the book is missing, check your inbox and spam for an Amazon verification or delivery error. [Amazon’s delivery errors](https://digprjsurvey.amazon.com/csad/help/node/T48rsVm3gY7KeGkKUk)
+
+## Try a ready-made EPUB
+
+*Tiny Parsers* is a short book included with the project. These renders show the same chapter in the PDF and the converted EPUB. [Original PDF](tests/fixtures/sample-outline.pdf) · [Download EPUB](docs/demo/tiny-parsers.epub?raw=1) · [Watch the font-size demo](docs/demo/reflow.gif)
 
 ![Side-by-side renders of the Reading Characters chapter](docs/demo/comparison.png)
 
-```mermaid
-flowchart TD
-    A[Read PDF text, fonts and coordinates] --> B[Recover paragraphs, headings, code and figures]
-    B --> C[Connect footnotes, links and the table of contents]
-    C --> D[Save reflowable EPUB]
-    D -->|Optional on macOS| E[Submit to a Kindle address via Apple Mail]
-```
-
-## Quick start
+## Command line
 
 Install with Python 3.10 or later, then convert a PDF.
 
@@ -27,7 +51,7 @@ python -m pip install -e .
 pdf2kindle book.pdf
 ```
 
-Find `book.epub` beside the PDF. To read it on Kindle, upload it through [Send to Kindle](https://www.amazon.com/sendtokindle). On macOS, you can also configure a sender in Apple Mail, approve its email address in Amazon’s Personal Document Settings, and run `pdf2kindle book.pdf --send-to reader@kindle.com` to convert and submit in one step.
+Find `book.epub` beside the PDF. On macOS, after setting up Apple Mail and approving the sender, run `pdf2kindle book.pdf --send-to YOUR_ADDRESS@kindle.com` to convert and submit in one step.
 
 ## For agents
 
@@ -35,7 +59,7 @@ Find `book.epub` beside the PDF. To read it on Kindle, upload it through [Send t
 pdf2kindle convert book.pdf -o book.epub --report report.json
 ```
 
-Check the exit code and the report’s `warnings` array. If delivery was requested and the EPUB already exists, run `pdf2kindle send book.epub --to reader@kindle.com`. A successful send command means Apple Mail accepted the request. Check Outbox and Sent before retrying. Confirm delivery when the book appears in the Kindle library.
+Check the exit code and the report’s `warnings` array. If the user requests email delivery and the EPUB already exists, run `pdf2kindle send book.epub --to YOUR_ADDRESS@kindle.com` with the user’s actual address. A successful command means Apple Mail accepted the request. Check Outbox and Sent before retrying. Confirm delivery when the book appears in the Kindle library.
 
 ## Conversion reference
 
@@ -69,6 +93,14 @@ Run `pdf2kindle convert --help` for all options.
 4. Copy the example profile, adjust the settings and convert again with `pdf2kindle book.pdf --profile book.toml`. [Example profile](examples/book.toml)
 
 ## Implementation
+
+```mermaid
+flowchart TD
+    A[Read PDF text, fonts and coordinates] --> B[Recover paragraphs, headings, code and figures]
+    B --> C[Connect footnotes, links and the table of contents]
+    C --> D[Save reflowable EPUB]
+    D -->|Optional on macOS| E[Submit to a Kindle address via Apple Mail]
+```
 
 | Module | Responsibility |
 | --- | --- |
