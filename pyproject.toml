@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,6 +7,8 @@ name = "pdf2kindle"
 version = "0.1.0"
 description = "Convert born-digital technical-book PDFs into clean, reflowable EPUBs tuned for Kindle."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
     "pymupdf>=1.25",
