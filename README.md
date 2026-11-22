@@ -10,15 +10,16 @@ Open Claude Code or Codex on your computer and paste this prompt. Replace the sa
 
 ```text
 Use https://github.com/ccomkhj/pdf2kindle to convert this PDF into a Kindle-ready EPUB.
-https://supermindai.github.io/AI-Agent-Book/Engineering-AI-Agents.pdf
+https://github.com/RavinRau/Ebooks/blob/main/Software%20Engineering%20Principle/The%20Pragmatic%20Programmer%20Your%20Journey%20to%20Mastery,%2020th%20Anniversary%20Edition%20by%20Andrew%20Hunt%20David%20Hurst%20Thomas.pdf
 
-Set up the converter locally, run it, and give me the saved EPUB and the
-Amazon Send to Kindle upload link.
+Download the raw PDF from GitHub, set up the converter locally, and give me
+the converted EPUB and the Amazon Send to Kindle upload link.
 ```
 
 Upload the resulting EPUB while signed in to the Amazon account you use on your Kindle. Then sync your Kindle and look for the book in your library. [Send to Kindle](https://www.amazon.com/sendtokindle)
 
-## Send by email on a Mac
+<details>
+<summary>Send by email on a Mac</summary>
 
 1. Copy your device’s address from Amazon’s **Manage Your Content and Devices → Preferences → Personal Document Settings → Send to Kindle Email Settings**. [Find your Kindle address](https://digprjsurvey.amazon.com/csad/help/node/G7V489F2ZZU9JJGE)
 2. Sign in to your sending account in Apple Mail. Add the address Mail uses in the **From** field to Amazon’s **Approved Personal Document Email List**. If macOS asks, allow Claude Code, Codex, or the terminal running it to control Mail. [Approve your sender](https://digprjsurvey.amazon.com/csad/help/node/GX9XLEVV8G4DB28H) · [Allow Mail automation](https://support.apple.com/en-au/guide/mac-help/mchl07817563/mac)
@@ -30,9 +31,11 @@ Upload the resulting EPUB while signed in to the Amazon account you use on your 
    to approve a verification email from Amazon.
    ```
 
-4. If Amazon sends **“Verify your Send to Kindle document request”**, open it and click **Verify Request** within 48 hours. Then sync your Kindle. This was the final step when sending the *Engineering AI Agents* sample. [Amazon’s verification instructions](https://digprjsurvey.amazon.com/csad/help/node/G98WYFZBRHWGZACA)
+4. If Amazon sends **“Verify your Send to Kindle document request”**, open it and click **Verify Request** within 48 hours. Then sync your Kindle. [Amazon’s verification instructions](https://digprjsurvey.amazon.com/csad/help/node/G98WYFZBRHWGZACA)
 
 If the message stays in **Outbox**, open **Mail → Window → Connection Doctor**. If the outgoing server (SMTP) reports a login failure, sign in again under **System Settings → Internet Accounts**. Mail may send queued messages after reconnecting, so check **Sent** before retrying. If the message is in **Sent** and the book is missing, check your inbox and spam for an Amazon verification or delivery error. [Amazon’s delivery errors](https://digprjsurvey.amazon.com/csad/help/node/T48rsVm3gY7KeGkKUk)
+
+</details>
 
 ## Try a ready-made EPUB
 
@@ -111,7 +114,8 @@ flowchart TD
 | `debug.py`, `preview.py` | Inspect classifications and render device-sized previews. |
 | `delivery.py` | Submit the finished EPUB through macOS Mail. |
 
-## Validation and limitations
+<details>
+<summary>Validation and limitations</summary>
 
 Run `pytest` with the development extras installed. The suite covers generated PDFs with and without bookmarks, layout classification, code fonts, tables and Korean spacing. Earlier validation across ten publicly available books and five initial samples found zero EPUBCheck errors. Physical Kindle rendering remains unverified.
 
@@ -120,6 +124,8 @@ Run `pytest` with the development extras installed. The suite covers generated P
 - Display equations keep their original size and may have a white background in dark mode. Many equation images can make an EPUB large. Complex inline math can lose detail.
 - A Korean word split across lines can retain an extra space if it appears only once in the book.
 - For code that wraps awkwardly on your device, try `code_wrap = "plain"` in a book profile.
+
+</details>
 
 ## License
 
