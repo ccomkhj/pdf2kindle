@@ -4,19 +4,49 @@
 
 텍스트를 선택할 수 있는 단일 단 PDF를 Kindle에서 글자 크기를 조절하며 읽을 수 있는 EPUB 3 전자책으로 변환합니다. 변환은 로컬에서 실행됩니다.
 
-프로젝트 예제인 *Tiny Parsers*로 먼저 읽어 보세요. 아래 이미지는 같은 장을 PDF와 EPUB에서 렌더링한 결과입니다. [원본 PDF](../tests/fixtures/sample-outline.pdf) · [샘플 EPUB](demo/tiny-parsers.epub?raw=1) · [글자 크기 변경 데모](demo/reflow.gif) · [Kindle에 업로드](https://www.amazon.com/sendtokindle)
+## Claude Code 또는 Codex로 빠르게 시작하기
+
+컴퓨터에서 Claude Code 또는 Codex를 열고 아래 프롬프트를 붙여넣으세요. 예제 URL을 변환할 PDF 링크나 내 컴퓨터에 있는 PDF 파일 경로로 바꿔도 됩니다. 파일 첨부를 지원하는 앱에서는 PDF를 첨부하고 프롬프트에서 해당 파일을 지정하세요.
+
+```text
+이 저장소의 변환기로 아래 PDF를 Kindle에서 읽을 수 있는 EPUB으로 만들어 줘.
+https://github.com/ccomkhj/pdf2kindle
+
+변환할 PDF
+https://github.com/RavinRau/Ebooks/blob/main/Software%20Engineering%20Principle/The%20Pragmatic%20Programmer%20Your%20Journey%20to%20Mastery,%2020th%20Anniversary%20Edition%20by%20Andrew%20Hunt%20David%20Hurst%20Thomas.pdf
+
+GitHub에서 원본 PDF를 내려받고 내 컴퓨터에 변환기를 설치해서 실행해 줘.
+변환한 EPUB 파일과 Amazon Send to Kindle 업로드 링크를 알려 줘.
+```
+
+Kindle에서 사용하는 Amazon 계정으로 로그인해 변환한 EPUB을 업로드하세요. 그런 다음 Kindle을 동기화하고 라이브러리에서 책을 확인하세요. [Send to Kindle](https://www.amazon.com/sendtokindle)
+
+<details>
+<summary>Mac에서 이메일로 보내기</summary>
+
+1. Amazon의 **Manage Your Content and Devices → Preferences → Personal Document Settings → Send to Kindle Email Settings**에서 기기의 Kindle 이메일 주소를 복사하세요. [Kindle 주소 찾기](https://digprjsurvey.amazon.com/csad/help/node/G7V489F2ZZU9JJGE)
+2. Apple Mail에서 보낼 계정에 로그인하세요. Mail의 **보낸 사람** 주소를 Amazon의 **Approved Personal Document Email List**에 추가하세요. macOS에서 권한을 묻는 경우 Claude Code, Codex 또는 실행 중인 터미널이 Mail을 제어하도록 허용하세요. [발신 주소 승인하기](https://digprjsurvey.amazon.com/csad/help/node/GX9XLEVV8G4DB28H) · [Mail 자동화 허용하기](https://support.apple.com/en-au/guide/mac-help/mchl07817563/mac)
+3. 아래 프롬프트에서 실제 Kindle 주소로 바꾼 뒤 같은 대화에 붙여넣으세요.
+
+   ```text
+   방금 만든 EPUB을 pdf2kindle과 Apple Mail로 YOUR_ADDRESS@kindle.com에 보내 줘.
+   다시 보내기 전에 보낼 편지함과 보낸 편지함을 확인해 줘.
+   Amazon 확인 이메일에서 내가 승인해야 하면 알려 줘.
+   ```
+
+4. Amazon에서 **“Verify your Send to Kindle document request”** 이메일을 보내면 48시간 안에 **Verify Request**를 누르세요. 그런 다음 Kindle을 동기화하세요. [Amazon 확인 절차](https://digprjsurvey.amazon.com/csad/help/node/G98WYFZBRHWGZACA)
+
+메일이 **보낼 편지함**에 남아 있으면 **Mail → 윈도우 → 연결 진단**을 여세요. 발신 서버(SMTP)의 로그인에 실패했다면 **시스템 설정 → 인터넷 계정**에서 다시 로그인하세요. 연결이 복구되면 Mail이 대기 중인 메일을 보낼 수 있으니 다시 보내기 전에 **보낸 편지함**을 확인하세요. 메일이 발송됐는데 책이 보이지 않으면 받은 편지함과 스팸 폴더에서 Amazon의 확인 메일이나 오류 안내를 찾으세요. [Amazon 전송 오류 안내](https://digprjsurvey.amazon.com/csad/help/node/T48rsVm3gY7KeGkKUk)
+
+</details>
+
+## 변환된 EPUB으로 먼저 읽어 보기
+
+프로젝트 예제인 *Tiny Parsers*입니다. 아래 이미지는 같은 장을 PDF와 EPUB에서 렌더링한 결과입니다. [원본 PDF](../tests/fixtures/sample-outline.pdf) · [샘플 EPUB](demo/tiny-parsers.epub?raw=1) · [글자 크기 변경 데모](demo/reflow.gif)
 
 ![원본 PDF와 EPUB 비교](demo/comparison.png)
 
-```mermaid
-flowchart TD
-    A[PDF의 텍스트·글꼴·좌표] --> B[문단·제목·코드·그림 복원]
-    B --> C[각주·링크·목차 연결]
-    C --> D[리플로우 EPUB 저장]
-    D -->|선택 사항 · macOS| E[Apple Mail로 Kindle 주소에 전송 요청]
-```
-
-## 빠른 시작
+## 명령줄에서 사용하기
 
 Python 3.10 이상에서 저장소를 설치하고 PDF를 변환하세요.
 
@@ -27,7 +57,7 @@ python -m pip install -e .
 pdf2kindle book.pdf
 ```
 
-원본 PDF 옆에 `book.epub`이 생성됩니다. Kindle로 보내려면 [Send to Kindle](https://www.amazon.com/sendtokindle)에 업로드하세요. macOS에서는 Mail 발신 계정을 설정하고 Amazon에 해당 발신 주소를 승인한 뒤 `pdf2kindle book.pdf --send-to reader@kindle.com`으로 변환과 이메일 제출을 함께 실행할 수 있습니다.
+원본 PDF 옆에 `book.epub`이 생성됩니다. macOS에서는 Apple Mail을 설정하고 Amazon에 발신 주소를 승인한 뒤 `pdf2kindle book.pdf --send-to YOUR_ADDRESS@kindle.com`으로 변환과 이메일 제출을 한 번에 할 수 있습니다.
 
 ## 에이전트용
 
@@ -35,7 +65,7 @@ pdf2kindle book.pdf
 pdf2kindle convert book.pdf -o book.epub --report report.json
 ```
 
-종료 코드와 보고서의 `warnings`를 확인하세요. 전송 요청이 있고 EPUB이 이미 있으면 `pdf2kindle send book.epub --to reader@kindle.com`을 사용하세요. Mail 접수 후 재시도하기 전에 보낼 편지함과 보낸 편지함을 확인하세요. Kindle 라이브러리에 책이 나타나야 도착을 확인할 수 있습니다.
+종료 코드와 보고서의 `warnings`를 확인하세요. 사용자가 이메일 전송을 요청했고 EPUB이 이미 있다면 실제 Kindle 주소를 넣어 `pdf2kindle send book.epub --to YOUR_ADDRESS@kindle.com`을 실행하세요. 명령이 성공하면 Apple Mail이 전송 요청을 받은 상태입니다. 다시 보내기 전에 보낼 편지함과 보낸 편지함을 확인하세요. Kindle 라이브러리에 책이 나타나면 도착한 것입니다.
 
 ## 무엇을 해 주나
 
@@ -108,6 +138,14 @@ tables = "image"                     # 이 책의 표는 전부 이미지로
 
 ## 동작 원리
 
+```mermaid
+flowchart TD
+    A[PDF의 텍스트·글꼴·좌표] --> B[문단·제목·코드·그림 복원]
+    B --> C[각주·링크·목차 연결]
+    C --> D[리플로우 EPUB 저장]
+    D -->|선택 사항 · macOS| E[Apple Mail로 Kindle 주소에 전송 요청]
+```
+
 OCR이나 레이아웃 모델로 글자를 "다시 읽지" 않습니다. 텍스트 레이어가 있는 PDF에는 정확한 글자와
 글꼴·좌표가 이미 들어 있으므로, 그것을 그대로 쓰고 구조만 추론합니다. 그래서 오탈자가 생기지 않습니다.
 
@@ -124,7 +162,10 @@ OCR이나 레이아웃 모델로 글자를 "다시 읽지" 않습니다. 텍스�
 | `epub.py`, `kindle.css` | EPUB 작성과 Kindle용 스타일 |
 | `debug.py`, `preview.py` | 진단 도구 |
 
-## 검증
+<details>
+<summary>검증 및 한계</summary>
+
+### 검증
 
 테스트와 미리보기 도구는 `python -m pip install -e ".[dev,preview]"`로 설치합니다. 미리보기를 사용하려면 `playwright install chromium`도 실행하세요.
 
@@ -151,7 +192,7 @@ OCR이나 레이아웃 모델로 글자를 "다시 읽지" 않습니다. 텍스�
   코드 블록은 CSS가 무시돼도 들여쓰기가 남도록 만들었지만, 기기에서 어색한 점이 보이면
   `code_wrap = "plain"`으로 바꿔 보세요.
 
-## 한계
+### 한계
 
 - **스캔 PDF**: 텍스트 레이어가 없는 쪽은 쪽 이미지로 들어가고 경고가 나옵니다. 먼저
   [OCRmyPDF](https://github.com/ocrmypdf/OCRmyPDF) 같은 도구로 OCR을 거치세요.
@@ -165,6 +206,8 @@ OCR이나 레이아웃 모델로 글자를 "다시 읽지" 않습니다. 텍스�
 - **어긋난 북마크**: PDF 북마크가 실제 제목과 여러 쪽 떨어져 있으면 목차 항목이 제목 대신 근처 위치로 연결됩니다.
 - **ML 레이아웃 모델 미포함**: 다단·스캔본에는 Docling, Marker 같은 오픈소스 모델이 도움이 되지만,
   현재는 포함돼 있지 않습니다.
+
+</details>
 
 ## 라이선스
 
