@@ -10,3 +10,4 @@ build/
 /out/
 *.epub
 *.debug.pdf
+!docs/demo/tiny-parsers.epub
